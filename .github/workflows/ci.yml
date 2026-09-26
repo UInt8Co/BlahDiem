@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  contracts:
+    name: Device authority and wire contracts
+    runs-on: ubuntu-24.04
+    container: swift:${{ matrix.swift }}-noble
+    strategy:
+      matrix:
+        swift: ["6.3.3", "6.4.0"]
+    defaults:
+      run:
+        working-directory: BlahDiem-e2694399dc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: BlahDiem-e2694399dc
+      - uses: actions/checkout@v4
+        with:
+          repository: UInt8Co/diem
+          ref: 35cb123582c6b5e4bab6d5a3cfc1edd44f46d343
+          path: diem-e641a7df16
+      - name: Test Swift contracts
+        run: swift test -j 4
+      - name: Compile vector generator
+        run: swift build --product blah-diem-device-vectors -j 4
+      - uses: denoland/setup-deno@v2
+        if: matrix.swift == '6.4.0'
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-java@v4
+        if: matrix.swift == '6.4.0'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Verify independent wire and HPKE receivers
+        if: matrix.swift == '6.4.0'
+        run: |
+          deno check Scripts/verify-device-vectors.ts
+          deno run --allow-read Scripts/verify-device-vectors.ts
+          deno run --allow-read --allow-run --allow-write Scripts/verify-hpke-vectors.ts
+
+  apple:
+    name: Apple cryptography
+    runs-on: macos-26
+    # GitHub job containers require Linux; Xcode 26.6 provides Swift 6.3.3 here.
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: BlahDiem-e2694399dc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: BlahDiem-e2694399dc
+      - uses: actions/checkout@v4
+        with:
+          repository: UInt8Co/diem
+          ref: 35cb123582c6b5e4bab6d5a3cfc1edd44f46d343
+          path: diem-e641a7df16
+      - name: Test Swift contracts
+        run: swift test
