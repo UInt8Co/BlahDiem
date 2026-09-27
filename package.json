@@ -1,0 +1,12 @@
+{
+  "name": "blahdiem-docs",
+  "private": true,
+  "scripts": {
+    "build": "bash Scripts/build-docs.sh",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "4.131.1"
+  }
+}

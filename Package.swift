@@ -11,6 +11,7 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/UInt8Co/diem.git", revision: "35cb123582c6b5e4bab6d5a3cfc1edd44f46d343"),
     .package(url: "https://github.com/apple/swift-crypto.git", from: "4.2.0"),
+    .package(url: "https://github.com/apple/swift-docc-plugin", exact: "1.4.6"),
   ],
   targets: [
     .target(name: "BlahDiem", dependencies: [
