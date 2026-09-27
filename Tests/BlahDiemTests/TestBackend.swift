@@ -12,9 +12,10 @@ final class TestBackend: CryptoBackend {
   func advance(by seconds: UInt64) { time.add(seconds, ordering: .relaxed) }
 
   func randomBytes(count: Int) -> [UInt8] { base.randomBytes(count: count) }
-  func makePrivateKey(_ algorithm: PublicKey.Algorithm, restoring raw: [UInt8]?) async throws
-    -> PrivateKey
-  { try await base.makePrivateKey(algorithm, restoring: raw) }
+  func makePrivateKey(
+    _ algorithm: PublicKey.Algorithm, for purpose: PublicKey.Purpose, restoring raw: [UInt8]?
+  ) async throws -> PrivateKey
+  { try await base.makePrivateKey(algorithm, for: purpose, restoring: raw) }
   func isValidSignature(_ signature: [UInt8], for message: [UInt8], by key: PublicKey)
     async throws -> Bool
   { try await base.isValidSignature(signature, for: message, by: key) }

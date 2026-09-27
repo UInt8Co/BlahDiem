@@ -12,6 +12,18 @@ The identity key stays on the devices that manage the device set. It moves betwe
 as a `SealedIdentityKey`, sealed to the receiving device's encryption key, and is
 stored the same way, sealed to a key the device holds.
 
+## Keys
+
+Each key serves one purpose. The identity key only certifies devices; a device key signs
+profile content and every Blah proof; an encryption key only receives sealed identity keys.
+A DC's ``DCProfile/transportPublicKey`` is a separate RSA key for MTProto key exchange,
+never a Diem key, and is not post-quantum.
+
+New identities use ML-DSA-65 keys, and identity keys are sealed to X-Wing encryption keys,
+unless the caller chooses otherwise. Web clients target evergreen browsers: WebCrypto supplies SHA-2, HKDF,
+AES-256-GCM and X25519, and the client supplies ML-DSA-65 and ML-KEM-768 wherever
+WebCrypto lacks them.
+
 ## Profiles
 
 A `Profile` carries a ``BlahProfile`` as its data. A hosted identity names its

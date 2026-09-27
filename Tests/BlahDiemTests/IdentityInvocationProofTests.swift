@@ -10,6 +10,15 @@ import Testing
       UserProfile(home: home, domains: [try ProfileDomain("alice.one.example")]), using: backend)
   }
 
+  @Test func blahIdentitiesUsePostQuantumKeysForSeparatePurposes() async throws {
+    let alice = try await identity()
+    let identityKey = alice.profile.identityKey.key, deviceKey = alice.deviceKey.publicKey.key
+    #expect(identityKey.purpose == .identity && identityKey.algorithm == .mlDSA65)
+    #expect(deviceKey.purpose == .device && deviceKey.algorithm == .mlDSA65)
+    let consent = try await alice.prove(OAuthConsentChallenge.sample(expiresAt: backend.now + 60))
+    #expect(consent.proof.deviceID == alice.deviceKey.publicKey.id)
+  }
+
   @Test func invocationProofBindsTheChallengeAndExactQuery() async throws {
     let alice = try await identity()
     let challenge = try InvocationChallenge(
