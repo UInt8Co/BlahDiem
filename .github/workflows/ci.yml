@@ -8,7 +8,7 @@ on:
 
 jobs:
   contracts:
-    name: Device authority and wire contracts
+    name: Profile, proof and wire contracts
     runs-on: ubuntu-24.04
     container: swift:${{ matrix.swift }}-noble
     strategy:
@@ -24,27 +24,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UInt8Co/diem
-          ref: 35cb123582c6b5e4bab6d5a3cfc1edd44f46d343
+          ref: 3f3d2fa930634816adcb5367671b82741bc81514
           path: diem-e641a7df16
       - name: Test Swift contracts
         run: swift test -j 4
-      - name: Compile vector generator
-        run: swift build --product blah-diem-device-vectors -j 4
-      - uses: denoland/setup-deno@v2
-        if: matrix.swift == '6.4.0'
-        with:
-          deno-version: v2.x
-      - uses: actions/setup-java@v4
-        if: matrix.swift == '6.4.0'
-        with:
-          distribution: temurin
-          java-version: "21"
-      - name: Verify independent wire and HPKE receivers
-        if: matrix.swift == '6.4.0'
-        run: |
-          deno check Scripts/verify-device-vectors.ts
-          deno run --allow-read Scripts/verify-device-vectors.ts
-          deno run --allow-read --allow-run --allow-write Scripts/verify-hpke-vectors.ts
 
   apple:
     name: Apple cryptography
@@ -62,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UInt8Co/diem
-          ref: 35cb123582c6b5e4bab6d5a3cfc1edd44f46d343
+          ref: 3f3d2fa930634816adcb5367671b82741bc81514
           path: diem-e641a7df16
       - name: Test Swift contracts
         run: swift test

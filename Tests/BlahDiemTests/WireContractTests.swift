@@ -1,48 +1,55 @@
 import BlahDiem
-import Foundation
 import Testing
 
+/// Blah records keep fixed numeric tags and field positions.
 @Suite struct WireContractTests {
-  private let now: UInt64 = 1_800_000_000
-  private let key = [UInt8](repeating: 7, count: 32)
+  let backend = TestBackend()
 
-  @Test func numericTagsAndProfileFieldsAreExact() throws {
-    let destination = try FederationDestination(domain: "one.example", keyID: key)
-    let home = try HomeDelegation(homeIdentityID: key, epoch: 1, expiresAt: now + 3600,
-      domains: [ProfileDomain("id.one.example")])
-    guard case .map(let fields) = home.fields else { Issue.record("home fields are not a map"); return }
-    #expect(fields.map(\.key) == [.unsignedInt(0), .unsignedInt(1)])
-    let challenge = try DeviceLoginChallenge(operation: .signUp, nonce: key, expiresAt: now + 120,
-      identityID: key, deviceID: key, profileDigest: key, destination: destination,
-      authKeyID: 42, sessionID: 73)
-    let encoded = challenge.encoding
-    let values = try CanonicalCBOR.array(encoded, count: 12)
-    #expect(values[0] == .unsignedInt(BlahDiemTag.login.rawValue))
-    #expect(values[2] == .unsignedInt(1))
-    #expect(try DeviceLoginChallenge.decode(encoded).encoding == encoded)
-    #expect(throws: (any Error).self) {
-      try DeviceLoginChallenge.decode(CBOR.array([.textString("Blah/login")] + Array(values.dropFirst())).encode())
+  @Test func challengeTagsAndPositionsAreExact() throws {
+    let login = try LoginChallenge(
+      operation: .signIn, nonce: Fixture.nonce, expiresAt: 5, identityID: Fixture.dcID,
+      deviceID: Fixture.dcID, profileDigest: Fixture.dcID, dc: Fixture.dc, authKeyID: -1,
+      sessionID: 73)
+    let fields = try CBOR(decoding: login.encoding).arrayValue(count: 12)
+    #expect(fields[0] == .unsigned(3) && fields[1] == .unsigned(1) && fields[2] == .unsigned(2))
+    #expect(fields[8] == .text("one.example") && fields[10] == .unsigned(.max))
+    #expect(try LoginChallenge(encoding: login.encoding) == login)
+    var renamed = fields
+    renamed[0] = .text("Blah/login")
+    #expect(throws: BlahError.invalidChallenge) {
+      try LoginChallenge(encoding: CBOR.array(renamed).encoded)
     }
-    let reference = try CanonicalReference.identity(key, epoch: 1)
-    #expect(try CanonicalReference.decode(reference.encoding) == reference)
-    let ref = try CanonicalCBOR.array(reference.encoding, count: 6)
-    #expect(ref[0] == .unsignedInt(BlahDiemTag.reference.rawValue))
-    #expect(ref[2] == .unsignedInt(1))
+
+    let invocation = try InvocationChallenge(
+      domain: "alice.one.example", nonce: Fixture.nonce, expiresAt: 5, dc: Fixture.dcID,
+      transportKeyID: 42, sessionID: 73)
+    let statement = InvocationStatement(challenge: invocation, payload: [1])
+    let s = try CBOR(decoding: statement.encoding).arrayValue(count: 5)
+    #expect(s[0] == .unsigned(5) && s[2] == .bytes(invocation.encoding) && s[3] == .unsigned(1))
+    #expect(try CBOR(decoding: invocation.encoding).arrayValue(count: 8)[0] == .unsigned(4))
   }
 
-  @Test func namespaceAndDelegationShareTheSameProfileContract() throws {
-    let federation = try FederationIdentity(domain: "one.example", privateKey: key)
-    let device = try DeviceSigner(signingKey: SoftwareSigningKey(algorithm: .ed25519),
-      wrappingKey: SoftwareWrappingKey(algorithm: .x25519))
-    let home = try HomeDelegation(homeIdentityID: federation.destination.keyID, epoch: 1,
-      expiresAt: now + 3600)
-    let profile = try IdentityController.create(on: device, fields: home.fields, at: now).profile
-    #expect(try HomeDelegation(profile: profile, at: now) == home)
-    let namespace = try BlahClientNamespace(profile: profile,
-      bootstrap: .init(domain: federation.destination.domain,
-        publicKey: Data(federation.signingKey.publicKey.encoding), namespaceVersion: "11"), at: now)
-    let fields = try CanonicalCBOR.array(namespace.encoding, count: 7)
-    #expect(fields[0] == .unsignedInt(BlahDiemTag.clientNamespace.rawValue))
+  @Test func profileDataAndNamespaceLayoutsAreExact() async throws {
+    let user = UserProfile(home: Fixture.home(account: 1_000_001), domains: [try ProfileDomain("a.example", isUsername: true)])
+    #expect(
+      try CBOR(decoding: user.encoded()) == .array([
+        .unsigned(13), .unsigned(1), .unsigned(1),
+        .array([.bytes(Fixture.dcID.bytes), .unsigned(1), .unsigned(TestBackend.start + 3600), .unsigned(1_000_001)]),
+        .array([.array([.text("a.example"), .bool(true)])]),
+      ]))
+
+    let identity = try await Identity(user, using: backend)
+    let namespace = try ClientNamespace(profile: identity.profile, dc: Fixture.dc, generation: 11)
+    let fields = try CBOR(decoding: namespace.encoding).arrayValue(count: 7)
+    #expect(fields[0] == .unsigned(10) && fields[5] == .unsigned(11) && fields[6] == .unsigned(1))
     #expect(namespace.identifier.count == 64)
+    try namespace.require(identity.profile)
+
+    let other = try DCAddress(domain: "two.example", id: Digest(hashing: [8]))
+    #expect(throws: BlahError.wrongHome) {
+      try ClientNamespace(profile: identity.profile, dc: other, generation: 11)
+    }
+    let stranger = try await Identity(user, using: backend)
+    #expect(throws: BlahError.wrongNamespace) { try namespace.require(stranger.profile) }
   }
 }

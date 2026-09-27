@@ -1,69 +1,83 @@
 import BlahDiem
-import Foundation
 import Testing
 
-/// A signed profile advertises the domains that host it and flags the public names.
+/// Blah profiles: homes, served domains and public names.
 @Suite struct NameClaimTests {
-  static let now: UInt64 = 1_800_000_000
-  static let key = [UInt8](repeating: 7, count: 32)
+  let backend = TestBackend()
 
-  @Test func aProfileCarriesItsNameBesideTheHomeAndKeepsItAcrossRenumbering() throws {
-    let device = try DeviceSigner(
-      signingKey: SoftwareSigningKey(algorithm: .ed25519), wrappingKey: SoftwareWrappingKey(algorithm: .x25519))
-    let home = try HomeDelegation(domain: "one.example", federationKeyID: Self.key, epoch: 1,
-      expiresAt: Self.now + 3600).claiming(name: "alice.one.example")
-    let profile = try IdentityController.create(on: device, fields: home.fields, at: Self.now).profile
-    let parsed = try HomeDelegation(profile: profile, at: Self.now)
-    #expect(parsed.name == "alice.one.example" && parsed.kind == .user)
-    #expect(try parsed.naming(account: 1_000_001).name == "alice.one.example")
-    #expect(try parsed.claiming(name: nil).fields != parsed.fields)
-    // An unnamed profile retains the domain list, even when it is empty.
-    let unnamed = try parsed.claiming(name: nil)
-    guard case .map(let pairs) = unnamed.fields else { throw FederationError.invalidDelegation }
-    #expect(pairs.count == 2)
+  @Test func aUserProfileKeepsItsNameAcrossRenumbering() async throws {
+    var user = UserProfile(home: Fixture.home(), domains: [try ProfileDomain("id.one.example")])
+    user.username = "alice.one.example"
+    var identity = try await Identity(user, using: backend)
+    var parsed = try UserProfile(identity.profile)
+    #expect(parsed == user && parsed.username == "alice.one.example")
+
+    parsed.home?.account = 1_000_001
+    let numbered = try UserProfile(try await identity.update(parsed))
+    #expect(numbered.home?.account == 1_000_001 && numbered.username == "alice.one.example")
+
+    parsed.username = nil
+    #expect(try UserProfile(try await identity.update(parsed)).domains.map(\.name) == ["id.one.example"])
   }
 
   @Test func namesAreDomainsAndABotsFirstLabelEndsInBot() throws {
     for name in ["alice", "Alice.example", "ali_ce.example", "-a.example", "a..example", "a.example."] {
-      #expect(throws: FederationError.invalidName) {
-        try HomeDelegation(domain: "one.example", federationKeyID: Self.key, epoch: 1,
-          expiresAt: Self.now + 3600, name: name)
-      }
+      #expect(throws: BlahError.invalidName) { try ProfileDomain(name) }
+      var user = UserProfile(home: nil)
+      user.username = name
+      #expect(throws: BlahError.invalidName) { try user.encoded() }
     }
-    #expect(throws: FederationError.invalidName) {
-      try HomeDelegation(kind: .bot, domain: "one.example", federationKeyID: Self.key, epoch: 1,
-        expiresAt: Self.now + 3600, account: 1_000_002, name: "helper.one.example")
-    }
-    let bot = try HomeDelegation(kind: .bot, domain: "one.example", federationKeyID: Self.key, epoch: 1,
-      expiresAt: Self.now + 3600, account: 1_000_002, name: "helperbot.one.example")
-    #expect(bot.name == "helperbot.one.example")
-    // A resource's number comes from its own local space.
-    #expect(throws: FederationError.invalidDelegation) {
-      try HomeDelegation(kind: .channel, domain: "one.example", federationKeyID: Self.key, epoch: 1,
-        expiresAt: Self.now + 3600, account: LocalIDKind.chat.upperBound)
-    }
-    #expect(try CanonicalReference.identity(Self.key, kind: .bot, epoch: 1).kind == .user)
-    #expect(try CanonicalReference.identity(Self.key, kind: .stickerSet, epoch: 1).kind == .stickerSet)
-    #expect(DomainName.name("alice.one.example", isBelow: "one.example"))
-    #expect(!DomainName.name("one.example", isBelow: "one.example"))
-    #expect(!DomainName.name("aliceone.example", isBelow: "one.example"))
+    var bot = BotProfile(home: Fixture.home(account: 1_000_002))
+    bot.username = "helper.one.example"
+    #expect(throws: BlahError.invalidName) { try bot.encoded() }
+    bot.username = "helperbot.one.example"
+    #expect(try BotProfile(data: bot.encoded()) == bot)
+    #expect(DomainName.normalized("Alice.Example") == "alice.example")
   }
 
-  @Test func aProfileAdvertisesSeveralDomainsAndFlagsOnlyPublicNames() throws {
-    let domains = try [ProfileDomain("alice.example", username: true),
-      ProfileDomain("id.example"), ProfileDomain("alice.other.example", username: true)]
-    let home = try HomeDelegation(domain: "one.example", federationKeyID: Self.key, epoch: 1,
-      expiresAt: Self.now + 3600, domains: domains)
-    let device = try DeviceSigner(signingKey: SoftwareSigningKey(algorithm: .ed25519),
-      wrappingKey: SoftwareWrappingKey(algorithm: .x25519))
-    let signed = try IdentityController.create(on: device, fields: home.fields, at: Self.now).profile
-    let parsed = try HomeDelegation(profile: signed, at: Self.now)
-    #expect(parsed == home)
-    #expect(parsed.names("alice.example") && parsed.names("alice.other.example"))
-    #expect(parsed.advertises("id.example") && !parsed.names("id.example"))
-    #expect(!parsed.advertises("impostor.example"))
-    #expect(throws: FederationError.invalidName) {
-      try home.advertising([domains[0], domains[0]])
+  @Test func accountNumbersComeFromEachKindsOwnSpace() throws {
+    let channel = ChannelProfile(home: Fixture.home(account: 997_852_516_352))
+    #expect(throws: BlahError.invalidProfile) { try channel.encoded() }
+    let user = UserProfile(home: Fixture.home(account: 997_852_516_352))
+    #expect(try UserProfile(data: user.encoded()) == user)
+    #expect(throws: BlahError.invalidProfile) {
+      try UserProfile(home: Home(dc: Fixture.dcID, epoch: 0, expiresAt: 1)).encoded()
     }
+  }
+
+  @Test func aStickerSetHasExactlyOneShortName() throws {
+    let set = StickerSetProfile(home: Fixture.home(account: 5), shortName: "cats.one.example")
+    #expect(try StickerSetProfile(data: set.encoded()) == set)
+    let twoNames = try UserProfile(
+      home: nil, domains: [ProfileDomain("a.example", isUsername: true), ProfileDomain("b.example")]
+    ).encoded()
+    #expect(throws: BlahError.invalidProfile) { try StickerSetProfile(data: twoNames) }
+  }
+
+  @Test func eachKindDecodesOnlyAsItself() async throws {
+    let channel = try await Identity(ChannelProfile(home: Fixture.home()), using: backend)
+    guard case .channel(let decoded) = try AnyBlahProfile(channel.profile) else {
+      Issue.record("Expected a channel profile")
+      return
+    }
+    #expect(decoded.home == Fixture.home())
+    #expect(throws: BlahError.invalidProfile) { try UserProfile(channel.profile) }
+    #expect(throws: BlahError.invalidProfile) { try UserProfile(data: [0x80]) }
+  }
+
+  @Test func aDCProfileCarriesItsEndpoints() async throws {
+    let dc = DCProfile(
+      domains: ["one.example"], endpoints: [.init(host: "mtproto.one.example", port: 443, tls: true)],
+      bidcomEndpoints: [.init(host: "peer.one.example", port: 8443, tls: true)],
+      transportPublicKey: "-----BEGIN RSA PUBLIC KEY-----", namespaceGeneration: 11)
+    let identity = try await Identity(dc, using: backend)
+    #expect(try DCProfile(identity.profile) == dc)
+    #expect(try AnyBlahProfile(identity.profile).home == nil)
+    var unreachable = dc
+    unreachable.bidcomEndpoints = []
+    #expect(throws: BlahError.invalidProfile) { try unreachable.encoded() }
+    unreachable = dc
+    unreachable.endpoints[0].host = "user@host"
+    #expect(throws: BlahError.invalidProfile) { try unreachable.encoded() }
   }
 }

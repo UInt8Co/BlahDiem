@@ -1,129 +1,56 @@
-/// Numeric tags for Blah payloads embedded in Diem signed records or used as
-/// canonical local identifiers. Array positions following a tag are fixed field
-/// numbers; decoders require the exact record length and canonical CBOR.
-public enum BlahDiemTag: UInt64, Sendable {
-  case reference = 1
-  case references = 2
+/// Leading tags of Blah records. The fields after a tag and its version are fixed positions.
+enum BlahTag: UInt64 {
   case login = 3
-  case identityChallenge = 4
-  case identityInvocation = 5
+  case invocationChallenge = 4
+  case invocationStatement = 5
   case oauthConsent = 6
-  case credentialAuthority = 7
   case accountLink = 8
   case dcAdmin = 9
   case clientNamespace = 10
-  case bidcomBind = 11
-  case bidcomAccept = 12
+  case profile = 13
 }
 
-/// Keys in the Diem profile's application fields map.
-public enum BlahProfileField: UInt64, Sendable {
-  case home = 0
-  case domains = 1
-  case dc = 2
+/// Profile kind codes in Blah profile data.
+enum ProfileKind: UInt64 {
+  case user = 1
+  case channel = 2
+  case bot = 3
+  case stickerSet = 4
+  case dc = 5
 }
 
-enum BlahReferenceTag: UInt64 {
-  case identity = 1, authority = 2, object = 3, conversation = 4, event = 5, authorization = 6
-}
+/// Decoding helpers that map Diem encoding errors to one Blah error.
+extension CBOR {
+  static func record(_ bytes: [UInt8], tag: BlahTag, count: Int?, error: BlahError)
+    throws(BlahError) -> [CBOR]
+  {
+    guard let fields = try? CBOR(decoding: bytes).arrayValue(count: count), fields.count >= 3,
+      fields[0] == .unsigned(tag.rawValue), fields[1] == .unsigned(1)
+    else { throw error }
+    return fields
+  }
 
-extension HomeDelegation.Kind {
-  var wireCode: UInt64 {
-    switch self {
-    case .user: 1
-    case .channel: 2
-    case .bot: 3
-    case .stickerSet: 4
-    }
+  func field<T>(_ failure: BlahError, _ read: (CBOR) throws(DiemError) -> T) throws(BlahError) -> T {
+    do { return try read(self) } catch { throw failure }
   }
-  init?(wireCode: UInt64) {
-    switch wireCode {
-    case 1: self = .user
-    case 2: self = .channel
-    case 3: self = .bot
-    case 4: self = .stickerSet
-    default: return nil
-    }
-  }
-}
 
-extension LocalIDKind {
-  var wireCode: UInt64 {
-    switch self {
-    case .user: 1
-    case .chat: 2
-    case .monoforum: 3
-    case .file: 4
-    case .stickerSet: 5
-    case .poll: 6
-    case .topic: 7
-    case .message: 8
-    case .dc: 9
-    case .authorization: 10
-    }
+  func digest(_ error: BlahError) throws(BlahError) -> Digest {
+    try field(error) { value throws(DiemError) in try Digest(bytes: value.bytesValue()) }
   }
-  init?(wireCode: UInt64) {
-    switch wireCode {
-    case 1: self = .user
-    case 2: self = .chat
-    case 3: self = .monoforum
-    case 4: self = .file
-    case 5: self = .stickerSet
-    case 6: self = .poll
-    case 7: self = .topic
-    case 8: self = .message
-    case 9: self = .dc
-    case 10: self = .authorization
-    default: return nil
-    }
-  }
-}
 
-extension DeviceLoginChallenge.Operation {
-  var wireCode: UInt64 { self == .signUp ? 1 : 2 }
-  init?(wireCode: UInt64) {
-    switch wireCode {
-    case 1: self = .signUp
-    case 2: self = .signIn
-    default: return nil
-    }
+  func unsigned(_ error: BlahError) throws(BlahError) -> UInt64 {
+    try field(error) { value throws(DiemError) in try value.unsignedValue() }
   }
-}
 
-extension AccountLinkChallenge.Operation {
-  var wireCode: UInt64 {
-    switch self {
-    case .read: 1
-    case .start: 2
-    case .confirm: 3
-    case .unlink: 4
-    }
+  func bytes(_ error: BlahError, count: Int? = nil) throws(BlahError) -> [UInt8] {
+    try field(error) { value throws(DiemError) in try value.bytesValue(count: count) }
   }
-  init?(wireCode: UInt64) {
-    switch wireCode {
-    case 1: self = .read
-    case 2: self = .start
-    case 3: self = .confirm
-    case 4: self = .unlink
-    default: return nil
-    }
-  }
-}
 
-extension DCAdminChallenge.Operation {
-  var wireCode: UInt64 {
-    switch self {
-    case .read: 1
-    case .replace: 2
-    case .linkBot: 3
-    }
+  func text(_ error: BlahError) throws(BlahError) -> String {
+    try field(error) { value throws(DiemError) in try value.textValue() }
   }
-  init?(wireCode: UInt64) {
-    switch wireCode {
-    case 1: self = .read
-    case 2: self = .replace
-    case 3: self = .linkBot
-    default: return nil
-    }
+
+  func array(_ error: BlahError, count: Int? = nil) throws(BlahError) -> [CBOR] {
+    try field(error) { value throws(DiemError) in try value.arrayValue(count: count) }
   }
 }

@@ -1,90 +1,80 @@
-import Crypto
-import Foundation
-
-/// A short-lived, single-use request challenge. The domain is the address from
-/// which the verifier must fetch the identity's current public profile.
-public struct IdentityInvocationChallenge: Sendable, Equatable {
+/// A DC's one-use challenge for an identity-proven MTProto call. ``domain`` serves the
+/// profile the DC verifies the proof against.
+public struct InvocationChallenge: Hashable, Sendable {
   public let domain: String
   public let nonce: [UInt8]
   public let expiresAt: UInt64
-  public let destinationID: [UInt8]
+  /// The issuing DC's identity ID.
+  public let dc: Digest
   public let transportKeyID: Int64
   public let sessionID: UInt64
 
   public init(
-    domain: String, nonce: [UInt8], expiresAt: UInt64, destinationID: [UInt8],
-    transportKeyID: Int64, sessionID: UInt64
-  ) throws {
-    guard DomainName.isValid(domain), nonce.count == 32, destinationID.count == 32,
-      expiresAt <= UInt64(Int64.max), transportKeyID != 0, sessionID != 0
-    else { throw FederationError.invalidChallenge }
+    domain: String, nonce: [UInt8], expiresAt: UInt64, dc: Digest, transportKeyID: Int64,
+    sessionID: UInt64
+  ) throws(BlahError) {
+    guard DomainName.isValid(domain), nonce.count == 32, expiresAt <= UInt64(Int64.max),
+      transportKeyID != 0, sessionID != 0
+    else { throw .invalidChallenge }
     self.domain = domain
     self.nonce = nonce
     self.expiresAt = expiresAt
-    self.destinationID = destinationID
+    self.dc = dc
     self.transportKeyID = transportKeyID
     self.sessionID = sessionID
   }
 
-  public var encoding: [UInt8] {
-    CBOR.array([
-      .unsignedInt(BlahDiemTag.identityChallenge.rawValue), .unsignedInt(1), .textString(domain),
-      .byteString(nonce[...]), .unsignedInt(expiresAt),
-      .byteString(destinationID[...]), .unsignedInt(UInt64(bitPattern: transportKeyID)),
-      .unsignedInt(sessionID),
-    ]).encode()
+  public init(encoding: [UInt8]) throws(BlahError) {
+    let e = BlahError.invalidChallenge
+    let a = try CBOR.record(encoding, tag: .invocationChallenge, count: 8, error: e)
+    try self.init(
+      domain: a[2].text(e), nonce: a[3].bytes(e), expiresAt: a[4].unsigned(e), dc: a[5].digest(e),
+      transportKeyID: Int64(bitPattern: a[6].unsigned(e)), sessionID: a[7].unsigned(e))
   }
 
-  public static func decode(_ bytes: [UInt8]) throws -> Self {
-    let a = try CanonicalCBOR.array(bytes, count: 8)
-    guard a[0] == .unsignedInt(BlahDiemTag.identityChallenge.rawValue), a[1] == .unsignedInt(1),
-      case .textString(let domain) = a[2], case .byteString(let nonce) = a[3],
-      case .unsignedInt(let expiry) = a[4], case .byteString(let destination) = a[5],
-      case .unsignedInt(let key) = a[6], case .unsignedInt(let session) = a[7]
-    else { throw FederationError.invalidChallenge }
-    return try .init(
-      domain: domain, nonce: Array(nonce), expiresAt: expiry,
-      destinationID: Array(destination), transportKeyID: Int64(bitPattern: key),
-      sessionID: session)
+  public var encoding: [UInt8] {
+    CBOR.array([
+      .unsigned(BlahTag.invocationChallenge.rawValue), .unsigned(1), .text(domain), .bytes(nonce),
+      .unsigned(expiresAt), .bytes(dc.bytes), .unsigned(UInt64(bitPattern: transportKeyID)),
+      .unsigned(sessionID),
+    ]).encoded
   }
 }
 
-/// The Diem signed message's content for one exact wrapped MTProto payload.
-/// The hash name is signed beside its digest so future algorithms cannot be
-/// confused with SHA-512. `challenge` is opaque to the client.
-public struct IdentityInvocationStatement: Sendable, Equatable {
-  public let challenge: [UInt8]
+/// A challenge and the SHA-512 digest of the exact wrapped MTProto query it authorizes.
+public struct InvocationStatement: BlahStatement {
+  public let challenge: InvocationChallenge
   public let payloadDigest: [UInt8]
 
-  public init(challenge: [UInt8], wrappedPayload: [UInt8]) {
+  /// The statement authorizing `payload` under `challenge`.
+  public init(challenge: InvocationChallenge, payload: [UInt8]) {
     self.challenge = challenge
-    self.payloadDigest = Array(SHA512.hash(data: wrappedPayload))
+    payloadDigest = SHA2.sha512(payload)
   }
 
-  private init(challenge: [UInt8], payloadDigest: [UInt8]) {
-    self.challenge = challenge
-    self.payloadDigest = payloadDigest
+  public init(encoding: [UInt8]) throws(BlahError) {
+    let e = BlahError.invalidChallenge
+    let a = try CBOR.record(encoding, tag: .invocationStatement, count: 5, error: e)
+    // Field 3 names the digest algorithm: 1 is SHA-512.
+    guard a[3] == .unsigned(1) else { throw e }
+    challenge = try InvocationChallenge(encoding: a[2].bytes(e))
+    payloadDigest = try a[4].bytes(e, count: 64)
   }
 
   public var encoding: [UInt8] {
     CBOR.array([
-      .unsignedInt(BlahDiemTag.identityInvocation.rawValue), .unsignedInt(1),
-      .byteString(challenge[...]), .unsignedInt(1),
-      .byteString(payloadDigest[...]),
-    ]).encode()
+      .unsigned(BlahTag.invocationStatement.rawValue), .unsigned(1), .bytes(challenge.encoding),
+      .unsigned(1), .bytes(payloadDigest),
+    ]).encoded
   }
 
-  public static func decode(_ bytes: [UInt8]) throws -> Self {
-    let a = try CanonicalCBOR.array(bytes, count: 5)
-    guard a[0] == .unsignedInt(BlahDiemTag.identityInvocation.rawValue), a[1] == .unsignedInt(1),
-      case .byteString(let challenge) = a[2], a[3] == .unsignedInt(1),
-      case .byteString(let digest) = a[4], digest.count == 64,
-      challenge.count <= CanonicalCBOR.maximumBytes
-    else { throw FederationError.invalidChallenge }
-    return Self(challenge: Array(challenge), payloadDigest: Array(digest))
-  }
+  /// Whether this statement authorizes exactly `payload`.
+  public func matches(_ payload: [UInt8]) -> Bool { payloadDigest == SHA2.sha512(payload) }
 
-  public func matches(_ wrappedPayload: [UInt8]) -> Bool {
-    payloadDigest == Array(SHA512.hash(data: wrappedPayload))
+  /// Requires a live challenge for a domain that serves this identity's profile.
+  public func validate(for identity: Identity) throws(BlahError) {
+    try identity.requireLive(until: challenge.expiresAt)
+    guard (try? AnyBlahProfile(identity.profile))?.domains.contains(challenge.domain) == true
+    else { throw .invalidChallenge }
   }
 }

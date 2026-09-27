@@ -1,18 +1,15 @@
 # BlahDiem
 
-Blah's device authority and identity contracts build on [Diem](https://github.com/UInt8Co/diem)
-CBOR, key, signature, encryption and protected-memory primitives. BlahDiem owns
-device rosters, profiles, enrollment and proofs, alongside
-home delegation, DC discovery, canonical references and cache namespaces.
-Servers and clients share these contracts.
-The package has no Telegram transport or server storage dependency.
+BlahDiem carries Blah's profiles and proofs on [Diem](https://github.com/UInt8Co/diem)
+identities: user, bot, channel, sticker-set and DC profiles, the DC challenges that
+devices sign, and the client cache namespace. Blah clients and DCs share it. It is
+Foundation-free and runs on any Diem `CryptoBackend`.
 
-Signed Blah records use canonical CBOR with fixed numeric tags and fixed field
-positions. `BlahDiemTag` assigns record tags; `BlahProfileField` assigns numeric
-keys inside a Diem profile. Every decoder validates the exact record shape.
+Blah records are canonical CBOR with a fixed numeric tag and fixed field positions, and
+every decoder validates the exact record shape.
 
-See [Device authority](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md) for the authority
-contract. Run `swift test` to check it. The package is licensed under MIT; see
+See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md).
+Run `swift test` to check the contracts. The package is licensed under MIT; see
 [LICENSE](LICENSE).
 
 ## API documentation
