@@ -3,13 +3,11 @@ import JavaScriptKit
 
 @JS public struct DCSetupRequest {
   public let data: [UInt8]
-  public let serverDevice: [UInt8]
   public let profile: [UInt8]?
   public let now: Double
 
-  public init(data: [UInt8], serverDevice: [UInt8], profile: [UInt8]?, now: Double) {
+  public init(data: [UInt8], profile: [UInt8]?, now: Double) {
     self.data = data
-    self.serverDevice = serverDevice
     self.profile = profile
     self.now = now
   }
@@ -29,7 +27,7 @@ import JavaScriptKit
   }
 }
 
-/// Creates or renews a DC identity and certifies the server's separate signing device.
+/// Creates or renews a DC profile entirely in the operator's browser.
 @JS public func dcSetup(input: DCSetupRequest, crypto: JSObject) async throws(JSException) -> DCSetupResult {
   do {
     guard let now = UInt64(exactly: input.now), now <= 9007199254740991 else {
@@ -37,7 +35,6 @@ import JavaScriptKit
     }
     let backend = BrowserBackend(now: now, crypto: crypto)
     let data = try DCProfile(data: input.data).encoded()
-    let serverDevice = try DevicePublicKey(PublicKey(encoding: input.serverDevice))
     let identityKey = try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity))
     let deviceKey = try await DevicePrivateKey(backend.makePrivateKey(.ed25519, for: .device))
     var identity: Identity
@@ -51,7 +48,6 @@ import JavaScriptKit
     } else {
       identity = try await Identity(data: data, identityKey: identityKey, deviceKey: deviceKey, using: backend)
     }
-    try await identity.add(serverDevice)
     return DCSetupResult(id: identity.id.description, profile: identity.profile.encoding,
       expiresAt: Double(identity.profile.validity.expiresAt), devices: deviceInfo(identity))
   } catch {

@@ -22,9 +22,11 @@ Each asynchronous operation retains its own crypto backend.
   identities. Specify `kind` and an operation: `create`, `inspect`, `renew`,
   `account`, `addDevice`, `removeDevice` or `prove`. Native profile rules validate
   names, account numbers, homes and devices.
-- `dcSetup` creates a DC identity or renews an existing one, using encoded DC data
-  and the server's public device key. It returns the signed public profile and
-  device list. Pass `profile: null` to create, or the existing profile to renew.
+- `dcSetup` creates a DC identity or renews an existing one using encoded DC data.
+  It returns the signed public profile and the operator device's certificate validity
+  (`notBefore` and `expiresAt`, Unix seconds). No server device is created or certified.
+  Pass `profile: null` to create, or the existing profile to renew. Only the public
+  signed profile is uploaded; identity and device private keys remain in the browser.
 - `inspectChallenge` decodes `invocation`, `login`, `oauthConsent`, `accountLink`
   and `dcAdmin` challenges into fields for session checks or consent UI. It does
   not authenticate the issuing server or grant approval.

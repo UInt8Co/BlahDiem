@@ -85,17 +85,17 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     }
   }
 
-  const dcData = encode([13, 1, 5, ['dc.example.org'], [['dc.example.org', 443, true]],
-    [['dc.example.org', 8443, true]], 'transport-public-key', 1]);
-  const input = {data: dcData, serverDevice: second.devices[0].key, profile: null, now: base.now};
+  const dcData = encode([13, 1, 5, ['dc.example.org'], [['dc.example.org', 443, true, 1, '/apiws']],
+    [['dc.example.org', 8443, true, 0, null]], 'transport-public-key', 1]);
+  const input = {data: dcData, profile: null, now: base.now};
   const created = await diem.dcSetup(input, alice);
-  check(data(created.profile)[2] === 5 && created.devices.length === 2, 'DC creation and server certification');
+  check(data(created.profile)[2] === 5 && created.devices.length === 1, 'DC creation without a server device');
+  check(created.devices.every(device => device.notBefore === base.now && device.expiresAt === base.now + 30 * 86400), 'Device validity metadata');
   const renewed = await diem.dcSetup({...input, profile: created.profile, now: base.now + 31 * 86400}, alice);
-  check(renewed.id === created.id && renewed.expiresAt > created.expiresAt && renewed.devices.length === 2, 'Expired DC recovery');
+  check(renewed.id === created.id && renewed.expiresAt > created.expiresAt && renewed.devices.length === 1, 'Expired DC recovery');
   check(equal(content(renewed.profile)[9], bytes(dcData)), 'DC data survives renewal');
   await rejects(() => diem.dcSetup({...input, profile: first.profile}, alice));
   await rejects(() => diem.dcSetup({...input, data: content(first.profile)[9]}, alice));
-  await rejects(() => diem.dcSetup({...input, serverDevice: []}, alice));
   await rejects(() => diem.dcSetup({...input, data: new Array(10)}, alice));
   await rejects(() => diem.dcSetup({...input, now: 1.5}, alice));
   const wrongSigner = await backend();

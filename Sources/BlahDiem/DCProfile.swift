@@ -1,15 +1,26 @@
 /// A DC's public profile: where clients and peer DCs reach it.
 public struct DCProfile: BlahProfile {
-  /// A network address.
+  /// The transport carrying MTProto; TLS is independent of the transport.
+  public enum Transport: UInt64, Sendable {
+    case tcp = 0
+    case webSocket = 1
+  }
+
+  /// A network address and, for WebSocket, its exact HTTP request path.
   public struct Endpoint: Hashable, Sendable {
     public var host: String
     public var port: UInt16
     public var tls: Bool
+    public var transport: Transport
+    public var path: String?
 
-    public init(host: String, port: UInt16, tls: Bool) {
+    public init(host: String, port: UInt16, tls: Bool,
+      transport: Transport = .tcp, path: String? = nil) {
       self.host = host
       self.port = port
       self.tls = tls
+      self.transport = transport
+      self.path = path
     }
   }
 
@@ -44,11 +55,13 @@ public struct DCProfile: BlahProfile {
     func endpoints(_ value: CBOR) throws(BlahError) -> [Endpoint] {
       var result: [Endpoint] = []
       for entry in try value.array(e) {
-        let a = try entry.array(e, count: 3)
-        guard let port = UInt16(exactly: try a[1].unsigned(e)), case .bool(let tls) = a[2] else {
+        let a = try entry.array(e, count: 5)
+        guard let port = UInt16(exactly: try a[1].unsigned(e)), case .bool(let tls) = a[2],
+          let transport = Transport(rawValue: try a[3].unsigned(e)) else {
           throw e
         }
-        result.append(Endpoint(host: try a[0].text(e), port: port, tls: tls))
+        result.append(Endpoint(host: try a[0].text(e), port: port, tls: tls,
+          transport: transport, path: a[4] == .null ? nil : try a[4].text(e)))
       }
       return result
     }
@@ -65,7 +78,10 @@ public struct DCProfile: BlahProfile {
   public func encoded() throws(BlahError) -> [UInt8] {
     try validate()
     func encode(_ endpoints: [Endpoint]) -> CBOR {
-      .array(endpoints.map { .array([.text($0.host), .unsigned(UInt64($0.port)), .bool($0.tls)]) })
+      .array(endpoints.map { .array([
+        .text($0.host), .unsigned(UInt64($0.port)), .bool($0.tls),
+        .unsigned($0.transport.rawValue), $0.path.map(CBOR.text) ?? .null,
+      ]) })
     }
     return CBOR.array([
       .unsigned(BlahTag.profile.rawValue), .unsigned(1), .unsigned(ProfileKind.dc.rawValue),
@@ -79,15 +95,32 @@ public struct DCProfile: BlahProfile {
       Set(domains).count == domains.count, domains.allSatisfy(DomainName.isValid)
     else { throw .invalidName }
     let valid = [endpoints, bidcomEndpoints].allSatisfy { list in
-      (1...Self.maximumEndpoints).contains(list.count)
-        && list.allSatisfy { endpoint in
-          !endpoint.host.isEmpty && endpoint.host.utf8.count <= DomainName.maximumLength
-            && endpoint.port > 0
-            && !endpoint.host.contains { $0.isWhitespace || $0 == "/" || $0 == "@" }
-        }
+      list.count <= Self.maximumEndpoints && Set(list).count == list.count
+        && list.allSatisfy { $0.isValid }
     }
-    guard valid, !transportPublicKey.isEmpty, transportPublicKey.utf8.count <= 8192,
+    guard valid, !endpoints.isEmpty, bidcomEndpoints.allSatisfy({ $0.transport == .tcp }),
+      !transportPublicKey.isEmpty, transportPublicKey.utf8.count <= 8192,
       namespaceGeneration.map({ (1...UInt64(Int64.max)).contains($0) }) ?? true
     else { throw .invalidProfile }
+  }
+}
+
+extension DCProfile.Endpoint {
+  /// Shared validation for profile publishers and configuration editors.
+  public var isValid: Bool {
+    guard !host.isEmpty, host.utf8.count <= DomainName.maximumLength, port > 0,
+      host.utf8.allSatisfy({
+        (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0)
+          || [45, 46, 58].contains($0)
+      })
+    else { return false }
+    switch transport {
+    case .tcp: return path == nil
+    case .webSocket:
+      guard let path, path.hasPrefix("/"), !path.hasPrefix("//"), path.utf8.count <= 2048,
+        path.utf8.allSatisfy({ $0 > 32 && $0 < 127 && $0 != 35 && $0 != 92 })
+      else { return false }
+      return true
+    }
   }
 }

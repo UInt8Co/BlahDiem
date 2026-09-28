@@ -85,11 +85,15 @@ func bytes(_ value: JSValue) -> [UInt8] {
   public let id: String
   public let key: [UInt8]
   public let current: Bool
+  public let notBefore: Double
+  public let expiresAt: Double
 
-  public init(id: String, key: [UInt8], current: Bool) {
+  public init(id: String, key: [UInt8], current: Bool, notBefore: Double, expiresAt: Double) {
     self.id = id
     self.key = key
     self.current = current
+    self.notBefore = notBefore
+    self.expiresAt = expiresAt
   }
 }
 
@@ -176,7 +180,8 @@ JavaScriptEventLoop.installGlobalExecutor()
 func deviceInfo(_ identity: Identity) -> [DeviceInfo] {
   identity.profile.devices.map { certificate in
     DeviceInfo(id: certificate.device.id.description, key: certificate.device.key.encoding,
-      current: certificate.device == identity.deviceKey.publicKey)
+      current: certificate.device == identity.deviceKey.publicKey,
+      notBefore: Double(certificate.validity.notBefore), expiresAt: Double(certificate.validity.expiresAt))
   }
 }
 

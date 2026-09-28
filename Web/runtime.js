@@ -54,7 +54,7 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
     },
     async dcSetup(input, crypto) {
       if(!validTime(input?.now)) throw new TypeError('Invalid DC setup time');
-      return exports.dcSetup({data: bytes(input.data, 'data'), serverDevice: bytes(input.serverDevice, 'serverDevice'),
+      return exports.dcSetup({data: bytes(input.data, 'data'),
         profile: input.profile == null ? null : bytes(input.profile, 'profile'), now: input.now}, backend(crypto));
     },
     inspectChallenge(kind, encoding) {

@@ -76,9 +76,34 @@ import Testing
     #expect(try AnyBlahProfile(identity.profile).home == nil)
     var unreachable = dc
     unreachable.bidcomEndpoints = []
-    #expect(throws: BlahError.invalidProfile) { try unreachable.encoded() }
+    #expect(try DCProfile(data: unreachable.encoded()).bidcomEndpoints.isEmpty)
     unreachable = dc
     unreachable.endpoints[0].host = "user@host"
     #expect(throws: BlahError.invalidProfile) { try unreachable.encoded() }
+  }
+
+  @Test func websocketEndpointsHaveExplicitTransportAndSignedPaths() async throws {
+    let endpoint = DCProfile.Endpoint(host: "ws.example", port: 443, tls: true,
+      transport: .webSocket, path: "/apiws?route=dc1")
+    let dc = DCProfile(domains: ["dc.example"], endpoints: [endpoint],
+      bidcomEndpoints: [], transportPublicKey: "rsa", namespaceGeneration: 1)
+    let identity = try await Identity(dc, using: backend)
+    try await identity.profile.verify(using: backend)
+    #expect(try DCProfile(identity.profile) == dc)
+    for path: String? in [nil, "", "apiws", "//other.example/", "/x#fragment", "/x\n", "/a\\b",
+      "/" + String(repeating: "x", count: 2048)] {
+      var invalid = dc
+      invalid.endpoints[0].path = path
+      #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
+    }
+    var invalid = dc
+    invalid.bidcomEndpoints = [endpoint]
+    #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
+    invalid = dc
+    invalid.endpoints[0].transport = .tcp
+    #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
+    invalid = dc
+    invalid.endpoints.append(endpoint)
+    #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
   }
 }

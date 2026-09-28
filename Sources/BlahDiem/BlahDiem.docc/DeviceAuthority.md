@@ -31,6 +31,15 @@ A `Profile` carries a ``BlahProfile`` as its data. A hosted identity names its
 number. A later epoch is a new account. Its ``ProfileDomain`` list names the domains that
 serve the profile; a flagged domain is a public name.
 
+A ``DCProfile`` advertises client and BIDCOM endpoints, the RSA transport key and
+database namespace generation. Each endpoint is encoded as
+`[host, port, tls, transport, path]`: transport 0 is TCP with a null path; transport 1
+is WebSocket with an absolute HTTP path, optionally including a query. TLS is explicit
+for either transport. The endpoint lists are bounded and contain no duplicates;
+BIDCOM accepts TCP only and can be empty. Clients verify the enclosing Diem profile
+and its discovery domain before using these values. This replaces the earlier three-field
+endpoint encoding.
+
 ## Proofs
 
 A DC issues a ``BlahStatement`` — a login, invocation or approval challenge — and a device
