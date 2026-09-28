@@ -1,0 +1,85 @@
+name: WebAssembly library
+
+on:
+  push:
+    branches: [main]
+    tags: ['web-v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: swift:6.4.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.1'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.16.0'
+      - uses: swiftwasm/setup-swiftwasm@v2
+        with:
+          tag: swift-6.4.0-RELEASE
+      - name: Install pinned optimizer
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz -o /tmp/binaryen.tar.gz
+          echo '2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  /tmp/binaryen.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/binaryen.tar.gz -C /tmp
+          echo '/tmp/binaryen-version_133/bin' >> "$GITHUB_PATH"
+      - name: Install web build dependencies
+        run: pnpm --dir Web install --frozen-lockfile
+      - name: Compile BridgeJS and minimize release
+        run: pnpm --dir Web build
+      - name: Install browser
+        run: pnpm --dir Web exec playwright install --with-deps chromium
+      - name: Verify minimized package in windows and workers
+        run: pnpm --dir Web test
+      - name: Package release
+        shell: bash
+        run: |
+          cd Web/dist
+          sha256sum -c SHA256SUMS
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -czf ../blahdiem-web.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blahdiem-web
+          path: |
+            Web/dist/*
+            Web/blahdiem-web.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/web-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: blahdiem-web
+          path: artifact
+      - name: Publish tested JS, WASM, declarations and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          cat > /tmp/release-notes.md <<'NOTES'
+          Prebuilt BlahDiem web library, generated with BridgeJS and minimized with Binaryen.
+          Tested in Window, DedicatedWorker and SharedWorker. Download the archive or all
+          matching JS/WASM/type files together; verify SHA256SUMS. See README.md for use,
+          compression, custody boundaries and build details.
+          NOTES
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "BlahDiem web $RELEASE_TAG" --notes-file /tmp/release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" artifact/dist/* artifact/blahdiem-web.tar.gz --clobber

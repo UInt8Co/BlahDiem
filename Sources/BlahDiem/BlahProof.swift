@@ -38,14 +38,14 @@ public struct BlahProof<Statement: BlahStatement>: Hashable, Sendable {
 
 extension Identity {
   /// Creates an identity publishing `profile`, with new software identity and device keys.
-  public init(_ profile: some BlahProfile, using backend: any CryptoBackend) async throws {
+  public init(_ profile: some BlahProfile, using backend: some CryptoBackend) async throws {
     try await self.init(data: profile.encoded(), using: backend)
   }
 
   /// Creates an identity publishing `profile`, whose only device is `deviceKey`.
   public init(
     _ profile: some BlahProfile, identityKey: IdentityPrivateKey, deviceKey: DevicePrivateKey,
-    using backend: any CryptoBackend
+    using backend: some CryptoBackend
   ) async throws {
     try await self.init(
       data: profile.encoded(), identityKey: identityKey, deviceKey: deviceKey, using: backend)

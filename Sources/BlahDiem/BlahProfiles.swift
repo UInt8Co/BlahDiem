@@ -169,9 +169,9 @@ public enum AnyBlahProfile: Hashable, Sendable {
   /// The domains that serve this profile.
   public var domains: [String] {
     switch self {
-    case .user(let p): p.domains.map(\.name)
-    case .bot(let p): p.domains.map(\.name)
-    case .channel(let p): p.domains.map(\.name)
+    case .user(let p): p.domains.map { $0.name }
+    case .bot(let p): p.domains.map { $0.name }
+    case .channel(let p): p.domains.map { $0.name }
     case .stickerSet(let p): [p.shortName]
     case .dc(let p): p.domains
     }
@@ -180,7 +180,7 @@ public enum AnyBlahProfile: Hashable, Sendable {
 
 extension [ProfileDomain] {
   fileprivate var username: String? {
-    get { first(where: \.isUsername)?.name }
+    get { first(where: { $0.isUsername })?.name }
     set {
       removeAll { $0.isUsername || $0.name == newValue }
       if let newValue { append(ProfileDomain(unchecked: newValue, isUsername: true)) }
@@ -244,15 +244,15 @@ enum HostedRecord {
         home.account.map({ $0 > 0 && $0 < accountLimit }) ?? true
       else { throw .invalidProfile }
     }
-    let usernames = domains.filter(\.isUsername)
-    guard domains.count <= maximumDomains, Set(domains.map(\.name)).count == domains.count,
+    let usernames = domains.filter { $0.isUsername }
+    guard domains.count <= maximumDomains, Set(domains.map { $0.name }).count == domains.count,
       domains.allSatisfy({ DomainName.isValid($0.name) })
     else { throw .invalidName }
     switch kind {
     case .stickerSet:
       guard domains.count == 1, usernames.count == 1 else { throw .invalidName }
     case .bot:
-      guard usernames.allSatisfy({ $0.name.split(separator: ".")[0].hasSuffix("bot") }) else {
+      guard usernames.allSatisfy({ $0.name.utf8.split(separator: 46)[0].suffix(3).elementsEqual("bot".utf8) }) else {
         throw .invalidName
       }
     default: break

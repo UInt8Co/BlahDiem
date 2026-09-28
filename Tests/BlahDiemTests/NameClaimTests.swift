@@ -21,7 +21,8 @@ import Testing
   }
 
   @Test func namesAreDomainsAndABotsFirstLabelEndsInBot() throws {
-    for name in ["alice", "Alice.example", "ali_ce.example", "-a.example", "a..example", "a.example."] {
+    for name in ["alice", "Alice.example", "ali_ce.example", "-a.example", "a-.example", "a..example", "a.example.",
+      "álîce.example", "alice.例え", "alice.💬", "a.\u{212A}", String(repeating: "a", count: 64) + ".example"] {
       #expect(throws: BlahError.invalidName) { try ProfileDomain(name) }
       var user = UserProfile(home: nil)
       user.username = name

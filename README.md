@@ -23,3 +23,9 @@ For Cloudflare Workers Builds, connect this repository to a Worker named `blahdi
 Use the repository root, `npm run build` as the build command, and `npm run deploy` as the
 deploy command. The Wrangler routes publish only `/blahdiem` and `/blahdiem/*` on the
 existing `docs.blahim.com` hostname.
+
+## Web clients
+
+[Web/README.md](Web/README.md) describes the BridgeJS-generated WASM library,
+worker support, minimized release artifacts and reproducible build/test procedure.
+Native consumers do not depend on the web package or its JavaScript build tools.

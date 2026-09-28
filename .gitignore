@@ -5,3 +5,7 @@ Package.resolved
 dist/
 node_modules/
 .wrangler/
+.build-*/
+.pnpm-store/
+Web/blahdiem-web.tar.gz
+!Web/Package.resolved

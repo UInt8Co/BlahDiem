@@ -11,12 +11,14 @@ public enum DomainName {
 
   /// Whether `value` is a lowercase domain.
   public static func isValid(_ value: String) -> Bool {
-    guard value.utf8.count <= maximumLength, value == value.lowercased(), value.contains(".") else {
+    let bytes = value.utf8
+    guard bytes.count <= maximumLength, bytes.contains(46) else {
       return false
     }
-    return value.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
-      !label.isEmpty && label.utf8.count <= 63 && label.first != "-" && label.last != "-"
-        && label.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 45 }
+    // DNS wire names are ASCII. Byte validation avoids Unicode casing and grapheme tables.
+    return bytes.split(separator: 46, omittingEmptySubsequences: false).allSatisfy { label in
+      !label.isEmpty && label.count <= 63 && label.first != 45 && label.last != 45
+        && label.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 45 }
     }
   }
 }
