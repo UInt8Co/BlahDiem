@@ -17,6 +17,10 @@ jobs:
     container: swift:6.4.0-noble
     steps:
       - uses: actions/checkout@v4
+      - name: Trust checkout for container build steps
+        # checkout's safe.directory entry is in its temporary Git config.
+        # The build also reads Git metadata from the runner-owned mount.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@v4
         with:
           node-version: '24.11.1'
