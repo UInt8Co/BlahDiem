@@ -92,6 +92,18 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   check(data(created.profile)[2] === 5 && created.devices.length === 1, 'DC creation without a server device');
   check(created.expiresAt === base.now + 90 * 86400, 'Default 90-day DC profile');
   check(created.devices.every(device => device.notBefore === base.now && device.expiresAt === base.now + 90 * 86400), 'Default 90-day DC certificate');
+  const discovered = await diem.verifyDCProfile('dc.example.org', created.profile, base.now, {verify: alice.verify});
+  check(discovered.id === created.id && discovered.namespaceGeneration === '1', 'Verified DC identity and namespace');
+  check(discovered.endpoints[0].path === '/apiws' && discovered.endpoints[0].transport === 'webSocket', 'Verified DC endpoints');
+  for(const [domain, profile, now] of [
+    ['other.example.org', created.profile, base.now],
+    ['dc.example.org', first.profile, base.now],
+    ['dc.example.org', created.profile, base.now - 1],
+    ['dc.example.org', created.profile, created.expiresAt]
+  ]) await rejects(() => diem.verifyDCProfile(domain, profile, now, {verify: alice.verify}));
+  await rejects(() => diem.verifyDCProfile('dc.example.org', created.profile, base.now, {verify: async() => false}));
+  const changed = [...created.profile]; changed[changed.length - 1] ^= 1;
+  await rejects(() => diem.verifyDCProfile('dc.example.org', changed, base.now, {verify: alice.verify}));
   const renewed = await diem.dcSetup({...input, profile: created.profile, now: base.now + 91 * 86400,
     profileLifetime: 45 * 86400, deviceLifetime: 120 * 86400}, alice);
   check(renewed.id === created.id && renewed.expiresAt > created.expiresAt && renewed.devices.length === 1, 'Expired DC recovery');

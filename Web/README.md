@@ -29,6 +29,11 @@ Each asynchronous operation retains its own crypto backend.
   signed profile is uploaded; identity and device private keys remain in the browser.
   `profileLifetime` and `deviceLifetime` are positive integer seconds, both defaulting
   to 90 days. The requested profile lifetime must not exceed the certificate lifetime.
+- `verifyDCProfile` verifies a public DC profile’s certificates, signature, validity,
+  advertised discovery domain and required database generation without a signer.
+  It returns the identity, profile version/digest, exact client endpoints and transport
+  public key. The caller owns HTTPS fetching, transport selection, identity pinning and
+  persistent version floors; this operation only requires the `verify` crypto callback.
 - `inspectChallenge` decodes `invocation`, `login`, `oauthConsent`, `accountLink`
   and `dcAdmin` challenges into fields for session checks or consent UI. It does
   not authenticate the issuing server or grant approval.

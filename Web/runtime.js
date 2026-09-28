@@ -59,6 +59,12 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
         profileLifetime: input.profileLifetime ?? 90 * 86400,
         deviceLifetime: input.deviceLifetime ?? 90 * 86400}, backend(crypto));
     },
+    async verifyDCProfile(domain, encoding, now, crypto) {
+      if(typeof domain !== 'string' || domain.length > 253 || !validTime(now) || typeof crypto?.verify !== 'function') {
+        throw new TypeError('Invalid DC discovery request');
+      }
+      return exports.verifyDCProfile(domain, bytes(encoding, 'profile'), now, crypto);
+    },
     inspectChallenge(kind, encoding) {
       if(!challengeKinds.has(kind)) throw new TypeError('Invalid challenge kind');
       return exports.inspectChallenge(kind, bytes(encoding, 'challenge', 140_000));
