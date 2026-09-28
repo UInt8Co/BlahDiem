@@ -3,7 +3,6 @@ name: WebAssembly library
 on:
   push:
     branches: [main]
-    tags: ['web-v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -64,12 +63,13 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/web-v')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: blahdiem-web
@@ -78,16 +78,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
+          # Commit time keeps the tag stable when a run is retried on another day.
+          commit_time=$(git show -s --format=%ct "$GITHUB_SHA")
+          release_date=$(date -u -d "@$commit_time" +%Y%m%d)
+          release_tag="$release_date-${GITHUB_SHA:0:4}"
           cat > /tmp/release-notes.md <<'NOTES'
           Prebuilt BlahDiem web library, generated with BridgeJS and minimized with Binaryen.
           Tested in Window, DedicatedWorker and SharedWorker. Download the archive or all
           matching JS/WASM/type files together; verify SHA256SUMS. See README.md for use,
           compression, custody boundaries and build details.
           NOTES
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --title "BlahDiem web $RELEASE_TAG" --notes-file /tmp/release-notes.md
+          if ! gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release create "$release_tag" --target "$GITHUB_SHA" --title "$release_tag" --notes-file /tmp/release-notes.md
           fi
-          gh release upload "$RELEASE_TAG" artifact/dist/* artifact/blahdiem-web.tar.gz --clobber
+          gh release upload "$release_tag" artifact/dist/* artifact/blahdiem-web.tar.gz --clobber

@@ -45,8 +45,11 @@ The pinned Diem revision supports Embedded directly. The build rejects unexpecte
 changes to its dependency checkout; no local source patches are needed.
 
 The web release workflow tests workers and uploads artifacts for pull requests and
-main. Pushing a `web-v*` tag publishes the matching tested files and archive in a
-GitHub release. Download a specific release, verify its checksums, and vendor the
+main. Each successful push build on `main` automatically tags the built commit and
+publishes its tested files and archive in a GitHub release named `YYYYMMDD-<sha4>`.
+The date is the commit's UTC date and `sha4` is the first four hexadecimal characters
+of its SHA; reruns reuse the same release. Pull requests and manual builds only upload
+workflow artifacts. Download a specific release, verify its checksums, and vendor the
 files together; do not fetch a mutable latest build at application runtime.
 
 ## Size investigation
