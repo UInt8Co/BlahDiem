@@ -1,5 +1,5 @@
-import type {IdentityRequest, IdentityResult} from './bridge-js';
-export type {IdentityRequest, IdentityResult, DeviceInfo} from './bridge-js';
+import type {IdentityRequest, IdentityResult, DCSetupRequest, DCSetupResult, ChallengeInfo} from './bridge-js';
+export type {IdentityRequest, IdentityResult, DeviceInfo, DCSetupRequest, DCSetupResult, ChallengeInfo} from './bridge-js';
 
 /** Keys remain with the caller; callbacks belong to this operation only. */
 export interface CryptoBackend {
@@ -10,5 +10,7 @@ export interface CryptoBackend {
 }
 export interface DiemClient {
   identityOperation(input: IdentityRequest, crypto: CryptoBackend): Promise<IdentityResult>;
+  dcSetup(input: DCSetupRequest, crypto: CryptoBackend): Promise<DCSetupResult>;
+  inspectChallenge(kind: string, encoding: number[] | Uint8Array): ChallengeInfo;
 }
 export function createDiem(wasmURL?: string | URL): Promise<DiemClient>;

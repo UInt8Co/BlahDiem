@@ -56,8 +56,11 @@ func bytes(_ value: JSValue) -> [UInt8] {
   public let keyID: String?
   public let sessionID: String?
   public let expiresAt: Double?
+  public let kind: String
+  public let challengeKind: String?
+  public let approvedChallenge: [UInt8]?
 
-  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?) {
+  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?, kind: String, challengeKind: String?, approvedChallenge: [UInt8]?) {
     self.operation = operation
     self.domain = domain
     self.profile = profile
@@ -72,6 +75,9 @@ func bytes(_ value: JSValue) -> [UInt8] {
     self.keyID = keyID
     self.sessionID = sessionID
     self.expiresAt = expiresAt
+    self.kind = kind
+    self.challengeKind = challengeKind
+    self.approvedChallenge = approvedChallenge
   }
 }
 
@@ -120,9 +126,11 @@ JavaScriptEventLoop.installGlobalExecutor()
         ? try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity)) : nil
       let dc = try Digest(bytes: input.dc)
       let domain = input.domain
+      let kind = input.kind
       var identity: Identity
       if input.operation == "create" {
-        let data = try UserProfile(home: Home(dc: dc, epoch: 1, expiresAt: backend.now + 30 * 86400),
+        let data = try HostedProfile(kind: kind,
+          home: Home(dc: dc, epoch: 1, expiresAt: backend.now + 30 * 86400),
           domains: [ProfileDomain(domain)]).encoded()
         guard let identityKey else { throw DiemError.identityKeyRequired }
         identity = try await Identity(data: data, identityKey: identityKey, deviceKey: deviceKey, using: backend)
@@ -130,31 +138,26 @@ JavaScriptEventLoop.installGlobalExecutor()
         identity = try await Identity(profile: Profile(encoding: input.profile),
           deviceKey: deviceKey, identityKey: identityKey, using: backend)
       }
-      var user = try UserProfile(identity.profile)
-      guard let home = user.home, home.dc == dc, user.domains.contains(where: { $0.name == domain })
+      var hosted = try HostedProfile(identity.profile, kind: kind)
+      guard let home = hosted.home, home.dc == dc, hosted.domains.contains(where: { $0.name == domain })
       else { throw BlahError.wrongHome }
       var proof: [UInt8] = []
       switch input.operation {
       case "renew":
-        user.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + 30 * 86400, account: home.account)
+        hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + 30 * 86400, account: home.account)
         try await identity.renew()
-        try await identity.update(data: user.encoded())
+        try await identity.update(data: hosted.encoded())
       case "account":
         guard let account = Int64(input.account ?? ""), account > 0,
           home.account == nil || home.account == account else { throw BlahError.wrongNamespace }
-        user.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: home.expiresAt, account: account)
-        try await identity.update(data: user.encoded())
+        hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: home.expiresAt, account: account)
+        try await identity.update(data: hosted.encoded())
       case "removeDevice":
         try await identity.remove(Digest(bytes: input.device ?? []))
       case "addDevice":
         try await identity.add(DevicePublicKey(PublicKey(encoding: input.device ?? [])))
       case "prove":
-        let challenge = try InvocationChallenge(encoding: input.challenge ?? [])
-        guard challenge.domain == domain, challenge.dc == dc, home.isActive(at: backend.now),
-          UInt64(bitPattern: challenge.transportKeyID) == UInt64(input.keyID ?? ""),
-          challenge.sessionID == UInt64(input.sessionID ?? ""),
-          challenge.expiresAt == input.expiresAt.flatMap(UInt64.init(exactly:)) else { throw BlahError.invalidChallenge }
-        proof = try await identity.prove(InvocationStatement(challenge: challenge, payload: input.query ?? [])).encoding
+        proof = try await proveChallenge(input, identity: identity, home: home)
       case "create", "inspect": break
       default: throw BlahError.invalidProfile
       }
@@ -162,19 +165,23 @@ JavaScriptEventLoop.installGlobalExecutor()
         dc: DCAddress(domain: input.dcDomain, id: dc), generation: generation)
       return IdentityResult(id: identity.id.description, namespace: namespace.identifier,
         profile: identity.profile.encoding, proof: proof,
-        account: user.home?.account.map(String.init) ?? "",
+        account: hosted.home?.account.map(String.init) ?? "",
         expiresAt: Double(identity.profile.validity.expiresAt),
-        devices: identity.profile.devices.map { certificate in
-          DeviceInfo(id: certificate.device.id.description, key: certificate.device.key.encoding,
-            current: certificate.device == deviceKey.publicKey)
-        })
+        devices: deviceInfo(identity))
     } catch {
       throw JSException(message: bridgeError(error))
     }
 }
 
+func deviceInfo(_ identity: Identity) -> [DeviceInfo] {
+  identity.profile.devices.map { certificate in
+    DeviceInfo(id: certificate.device.id.description, key: certificate.device.key.encoding,
+      current: certificate.device == identity.deviceKey.publicKey)
+  }
+}
+
 // Explicit codes avoid pulling Swift reflection into the browser binary.
-private func bridgeError(_ error: any Error) -> String {
+func bridgeError(_ error: any Error) -> String {
   if let error = error as? JSException { return error.description }
   if let error = error as? BlahError {
     switch error {

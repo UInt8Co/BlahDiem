@@ -1,9 +1,9 @@
 # BlahDiem for web clients
 
-This package compiles the canonical BlahDiem/Diem profile and proof rules to WASM.
-BridgeJS generates the Swift/JavaScript ABI and TypeScript declarations. The bundled
-ES module works in a window, dedicated worker or shared worker; it needs no DOM,
-global callbacks, cross-origin isolation, or third-party runtime downloads.
+The WASM library runs BlahDiem's canonical profile and proof rules in windows,
+dedicated workers and shared workers. BridgeJS generates the JavaScript ABI and
+TypeScript declarations. WebCrypto supplies Ed25519 signing and verification;
+private-key custody, backups, profile hosting and user consent belong to the caller.
 
 ```js
 import {createDiem} from './diem.js';
@@ -11,62 +11,58 @@ const diem = await createDiem(new URL('./diem.wasm', import.meta.url));
 const result = await diem.identityOperation(request, cryptoBackend);
 ```
 
-`request` is the generated `IdentityRequest` type in `bridge-js.d.ts`. Operations are
-`create`, `inspect`, `renew`, `account`, `addDevice`, `removeDevice` and `prove`.
-Profile and proof bytes always come from Swift. Decimal strings preserve 64-bit
-identifiers. The backend supplies Ed25519 public keys and asynchronous sign/verify
-callbacks; private key storage, encryption, profile hosting, and user consent belong
-to the client. Each operation owns its backend, so concurrent callers cannot replace
-one another's signer. Invalid requests reject their promise.
+## API
 
-Serve `diem.js` and `diem.wasm` together, using `application/wasm` for the latter.
-Pass an explicit URL when copying the files to a different directory. Precompressed
-`.br`/`.gz` copies are provided for servers that negotiate `Content-Encoding`;
-do not serve compressed bytes as unencoded WASM. No service worker is required.
+`diem.d.ts` and `bridge-js.d.ts` define the requests, results and crypto callbacks.
+Bytes are arrays of integers from 0 to 255; the adapter also accepts `Uint8Array`.
+64-bit identifiers use decimal strings. Operation times use safe integer Unix seconds.
+Each asynchronous operation retains its own crypto backend.
+
+- `identityOperation` manages hosted `user`, `channel`, `bot` and `stickerSet`
+  identities. Specify `kind` and an operation: `create`, `inspect`, `renew`,
+  `account`, `addDevice`, `removeDevice` or `prove`. Native profile rules validate
+  names, account numbers, homes and devices.
+- `dcSetup` creates a DC identity or renews an existing one, using encoded DC data
+  and the server's public device key. It returns the signed public profile and
+  device list. Pass `profile: null` to create, or the existing profile to renew.
+- `inspectChallenge` decodes `invocation`, `login`, `oauthConsent`, `accountLink`
+  and `dcAdmin` challenges into fields for session checks or consent UI. It does
+  not authenticate the issuing server or grant approval.
+
+For `prove`, set `challengeKind`, the received `challenge`, its expected
+`expiresAt`, and `approvedChallenge` containing the exact bytes the application
+checked or the user approved. Invocation and login proofs also require the
+current `keyID` and `sessionID`; invocation proofs bind the exact `query` bytes.
+The library checks the home, expiry, identity/device binding and native statement
+rules before signing. Proofs need only the device signer; identity keys certify
+and manage devices. Invalid requests reject without replacing another call's signer.
+
+## Vendoring a release
+
+Each successful `main` push publishes a GitHub release named `YYYYMMDD-<sha4>`.
+Download a specific release and verify `SHA256SUMS`. Vendor its matching
+`diem.js`, `diem.wasm`, declarations and license files together; retain the release
+tag and `manifest.json` with the checksums and source revision.
+
+Serve WASM as `application/wasm`. Supply an explicit WASM URL when relocating the
+assets. The `.br` and `.gz` files require the corresponding `Content-Encoding`.
+Consumers need no Swift toolchain or external runtime downloads.
 
 ## Build and test
 
-Install Swift 6.4, its `swift-6.4.0-RELEASE_wasm-embedded` SDK, Binaryen 133 and Node 24.
-The [web release workflow](../.github/workflows/web-release.yml) uses the official Swift
-Docker image and installs the matching WebAssembly SDK from Swift.org with a pinned checksum.
-From this directory run `pnpm install --frozen-lockfile`, `pnpm build`, then
-`pnpm exec playwright install --with-deps chromium` and `pnpm test`.
-`BLAH_BROWSER_EXECUTABLE` selects an existing Chromium installation.
-Generated output is in `Web/dist/`; normal consumers need neither Swift nor Binaryen.
-The build fails if the optimizer is missing or the artifact exceeds the size budget.
+Install Swift 6.4, the `swift-6.4.0-RELEASE_wasm-embedded` SDK, Binaryen 133,
+Node 24 and pnpm. From `Web/`:
 
-The build uses Swift 6.4 Embedded with `-Osize`, omits debug output, strips
-remaining SDK debug sections, then runs Binaryen `-Oz`. It bundles/minifies the
-generated BridgeJS module with JavaScriptKit and its WASI shim. Dependencies and
-tools are pinned. `manifest.json` records source revision, tools, sizes and hashes;
-`SHA256SUMS` covers all release files. Never mix the JS and WASM from different builds.
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm exec playwright install --with-deps chromium
+pnpm test
+```
 
-The pinned Diem revision supports Embedded directly. The build rejects unexpected
-changes to its dependency checkout; no local source patches are needed.
-
-The web release workflow tests workers and uploads artifacts for pull requests and
-main. Each successful push build on `main` automatically tags the built commit and
-publishes its tested files and archive in a GitHub release named `YYYYMMDD-<sha4>`.
-The date is the commit's UTC date and `sha4` is the first four hexadecimal characters
-of its SHA; reruns reuse the same release. Pull requests and manual builds only upload
-workflow artifacts. Download a specific release, verify its checksums, and vendor the
-files together; do not fetch a mutable latest build at application runtime.
-
-## Size investigation
-
-The previous tweb-owned release was 10,534,395 bytes, including about 4 MB of debug
-and symbol information. Its build silently skipped Binaryen when `wasm-opt` was
-missing. Stripping alone reduced it to 5,880,578 bytes; `-Oz` reduced it to
-4,027,692 bytes. The regular Swift typed BridgeJS build was approximately 4 MB raw /
-1.1 MB Brotli. Swift 6.4 Embedded reduces that to roughly 0.32 MB raw / 0.12 MB Brotli;
-`manifest.json` contains exact sizes for each build. Brotli is a transfer size,
-not the decoded module size.
-
-Domain validation and bot-name checks operate on ASCII bytes, avoiding unnecessary
-Unicode casing and character traversal. The linker retains the Unicode tables needed
-by Swift's string equality and hashing in the general CBOR decoder; dropping those
-tables would change existing text/map semantics. Unused table sections are discarded.
-The SDK enables Embedded mode directly. JavaScriptKit's legacy environment opt-in is
-disabled because its empty library objects omit async callback exports with this SDK.
-The executable uses the WASI reactor ABI so the same generated module works in windows
-and workers. Native contract tests and real browser crypto/proof tests cover the change.
+`BLAH_SWIFT`, `WASM_OPT` and `BLAH_BROWSER_EXECUTABLE` select installed tools.
+Build output is in `Web/dist/`. The build pins dependencies, generates BridgeJS
+bindings, minimizes the Embedded Swift binary and enforces artifact size limits.
+Tests run real WebCrypto operations in Window, DedicatedWorker and SharedWorker.
+The [release workflow](../.github/workflows/web-release.yml) owns CI tool installation,
+testing and packaging.

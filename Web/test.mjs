@@ -37,7 +37,7 @@ try {
     }), shared);
     assert.equal(result.realm, 'worker');
   }
-  console.log('PASS optimized BridgeJS package in Window, DedicatedWorker and SharedWorker; concurrent signer isolation, profiles, devices, renewal and rejection.');
+  console.log('PASS Window, DedicatedWorker and SharedWorker: hosted identity kinds, all challenge/proof kinds, DC setup/recovery, concurrent signers, devices and rejection.');
 } finally {
   await browser?.close();
   server.closeAllConnections();

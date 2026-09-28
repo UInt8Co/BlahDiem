@@ -1,5 +1,6 @@
 import challenge from './challenge.js';
 import {createDiem} from '../dist/diem.js';
+import {exerciseProfiles} from './profiles.js';
 
 function check(condition, message) { if(!condition) throw new Error(message); }
 async function rejects(action) {
@@ -27,7 +28,7 @@ async function backend() {
 export async function run() {
   const diem = await createDiem(new URL('../dist/diem.wasm', import.meta.url));
   const alice = await backend(), bob = await backend();
-  const base = {operation: 'create', domain: 'alice.example.org', profile: [], now: 1_800_000_000,
+  const base = {operation: 'create', kind: 'user', domain: 'alice.example.org', profile: [], now: 1_800_000_000,
     dc: Array(32).fill(42), dcDomain: 'dc.example.org', generation: '9007199254740993'};
   const [first, second] = await Promise.all([
     diem.identityOperation(base, alice),
@@ -44,7 +45,7 @@ export async function run() {
   }
   await rejects(() => diem.identityOperation(base, {...alice, sign: async() => { throw new Error('Signer refused'); }}));
   check((await perform('inspect')).id === first.id, 'Runtime survives backend rejection');
-  const extra = {challenge, expiresAt: 1800000060, keyID: '18446744073709551614',
+  const extra = {challenge, approvedChallenge: challenge, challengeKind: 'invocation', expiresAt: 1800000060, keyID: '18446744073709551614',
     sessionID: '18446744073709551613', query: [1, 2, 3, 4]};
   check((await perform('prove', extra)).proof.length > 64, 'Bound proof generation');
   for(const change of [{keyID: '1'}, {sessionID: '2'}, {expiresAt: 1800000061}, {now: 1800000061}]) {
@@ -62,6 +63,7 @@ export async function run() {
   // The optimized build must still reject tampered canonical profiles.
   const corrupt = [...removed.profile]; corrupt[corrupt.length - 1] ^= 1;
   await rejects(() => perform('inspect', {}, corrupt));
+  await exerciseProfiles({diem, backend, check, rejects, base, alice, first, second});
   check(!('blahCall' in globalThis) && !('blahCrypto' in globalThis), 'Global bridge callbacks leaked');
   return {realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};
 }
