@@ -27,6 +27,8 @@ do not serve compressed bytes as unencoded WASM. No service worker is required.
 ## Build and test
 
 Install Swift 6.4, its `swift-6.4.0-RELEASE_wasm-embedded` SDK, Binaryen 133 and Node 24.
+The [web release workflow](../.github/workflows/web-release.yml) uses the official Swift
+Docker image and installs the matching WebAssembly SDK from Swift.org with a pinned checksum.
 From this directory run `pnpm install --frozen-lockfile`, `pnpm build`, then
 `pnpm exec playwright install --with-deps chromium` and `pnpm test`.
 `BLAH_BROWSER_EXECUTABLE` selects an existing Chromium installation.

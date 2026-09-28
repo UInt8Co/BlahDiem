@@ -23,12 +23,16 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: '11.16.0'
-      - uses: swiftwasm/setup-swiftwasm@v2
-        with:
-          tag: swift-6.4.0-RELEASE
+      - name: Install Swift SDK for WebAssembly
+        run: >-
+          swift sdk install
+          https://download.swift.org/swift-6.4.0-release/wasm-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_wasm.artifactbundle.tar.gz
+          --checksum f07b7be3c586d92d7a07051fc6d303b87ebea67eadc40640ba59d5a8b79aa86d
       - name: Install pinned optimizer
         shell: bash
         run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl
           curl --fail --location --retry 3 https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz -o /tmp/binaryen.tar.gz
           echo '2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  /tmp/binaryen.tar.gz' | sha256sum -c -
           tar -xzf /tmp/binaryen.tar.gz -C /tmp
