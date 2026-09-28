@@ -27,6 +27,8 @@ Each asynchronous operation retains its own crypto backend.
   (`notBefore` and `expiresAt`, Unix seconds). No server device is created or certified.
   Pass `profile: null` to create, or the existing profile to renew. Only the public
   signed profile is uploaded; identity and device private keys remain in the browser.
+  `profileLifetime` and `deviceLifetime` are positive integer seconds, both defaulting
+  to 90 days. The requested profile lifetime must not exceed the certificate lifetime.
 - `inspectChallenge` decodes `invocation`, `login`, `oauthConsent`, `accountLink`
   and `dcAdmin` challenges into fields for session checks or consent UI. It does
   not authenticate the issuing server or grant approval.

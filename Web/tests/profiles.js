@@ -90,10 +90,19 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const input = {data: dcData, profile: null, now: base.now};
   const created = await diem.dcSetup(input, alice);
   check(data(created.profile)[2] === 5 && created.devices.length === 1, 'DC creation without a server device');
-  check(created.devices.every(device => device.notBefore === base.now && device.expiresAt === base.now + 30 * 86400), 'Device validity metadata');
-  const renewed = await diem.dcSetup({...input, profile: created.profile, now: base.now + 31 * 86400}, alice);
+  check(created.expiresAt === base.now + 90 * 86400, 'Default 90-day DC profile');
+  check(created.devices.every(device => device.notBefore === base.now && device.expiresAt === base.now + 90 * 86400), 'Default 90-day DC certificate');
+  const renewed = await diem.dcSetup({...input, profile: created.profile, now: base.now + 91 * 86400,
+    profileLifetime: 45 * 86400, deviceLifetime: 120 * 86400}, alice);
   check(renewed.id === created.id && renewed.expiresAt > created.expiresAt && renewed.devices.length === 1, 'Expired DC recovery');
   check(equal(content(renewed.profile)[9], bytes(dcData)), 'DC data survives renewal');
+  check(renewed.expiresAt === base.now + (91 + 45) * 86400, 'Chosen DC profile lifetime');
+  check(renewed.devices[0].expiresAt === base.now + (91 + 120) * 86400, 'Chosen DC certificate lifetime');
+  for(const lifetimes of [
+    {profileLifetime: 0}, {deviceLifetime: 0}, {profileLifetime: -1}, {deviceLifetime: 1.5},
+    {profileLifetime: 121 * 86400, deviceLifetime: 120 * 86400},
+    {deviceLifetime: Number.MAX_SAFE_INTEGER}
+  ]) await rejects(() => diem.dcSetup({...input, ...lifetimes}, alice));
   await rejects(() => diem.dcSetup({...input, profile: first.profile}, alice));
   await rejects(() => diem.dcSetup({...input, data: content(first.profile)[9]}, alice));
   await rejects(() => diem.dcSetup({...input, data: new Array(10)}, alice));

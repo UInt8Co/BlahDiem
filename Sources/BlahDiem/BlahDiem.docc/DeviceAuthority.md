@@ -6,7 +6,10 @@ How Blah uses Diem identities.
 
 An identity is an identity key. It certifies device keys; the certificates of one
 generation are the identity's current devices, and removing a device starts a new
-generation. A certificate lasts at most 30 days and profile content at most one day.
+generation. The publisher chooses profile and certificate lifetimes; a profile cannot
+outlive its signing certificate. DC browser setup defaults both to 90 days and lets the
+operator choose each period. Ordinary identity creation retains Diem's one-day profile
+and 30-day certificate defaults.
 
 The identity key stays on the devices that manage the device set. It moves between them
 as a `SealedIdentityKey`, sealed to the receiving device's encryption key, and is
