@@ -55,6 +55,19 @@ export async function run() {
   for(const change of [{keyID: '1'}, {sessionID: '2'}, {expiresAt: 1800000061}, {now: 1800000061}]) {
     await rejects(() => perform('prove', {...extra, ...change}));
   }
+  const domains = ['alice.example.org', 'second.example.org', 'discovery.example.org'];
+  const claimed = await perform('domains', {domains, usernameDomains: domains.slice(0, 2)});
+  check(JSON.stringify(claimed.domains) === JSON.stringify(domains), 'Ordered domain editing');
+  check(claimed.usernameDomains.length === 2, 'Username flags returned');
+  const hidden = await perform('domains', {domains: domains.slice(1), usernameDomains: []}, claimed.profile);
+  check(hidden.domains.length === 2 && hidden.usernameDomains.length === 0, 'Remove discovery domain and disable names');
+  check((await perform('inspect', {domain: domains[1]}, hidden.profile)).id === first.id, 'Changed discovery domain retains identity');
+  for(const change of [
+    {domains: [], usernameDomains: []},
+    {domains: [base.domain, base.domain], usernameDomains: []},
+    {domains: [base.domain], usernameDomains: ['unlisted.example.org']},
+    {domains: ['bad_domain.example.org'], usernameDomains: []}
+  ]) await rejects(() => perform('domains', change));
   const numbered = await perform('account', {account: '1000000'});
   check(numbered.account === '1000000', 'Account assignment');
   const renewed = await perform('renew', {now: base.now + 10}, numbered.profile);

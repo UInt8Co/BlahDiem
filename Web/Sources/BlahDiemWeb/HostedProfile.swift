@@ -4,7 +4,7 @@ import BlahDiem
 struct HostedProfile {
   let kind: String
   var home: Home?
-  let domains: [ProfileDomain]
+  var domains: [ProfileDomain]
 
   init(kind: String, home: Home?, domains: [ProfileDomain]) {
     self.kind = kind
