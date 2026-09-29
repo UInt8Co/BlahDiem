@@ -49,6 +49,8 @@ func bytes(_ value: JSValue) -> [UInt8] {
   public let dc: [UInt8]
   public let dcDomain: String
   public let generation: String
+  public let profileLifetime: Double
+  public let deviceLifetime: Double
   public let account: String?
   public let device: [UInt8]?
   public let challenge: [UInt8]?
@@ -60,7 +62,7 @@ func bytes(_ value: JSValue) -> [UInt8] {
   public let challengeKind: String?
   public let approvedChallenge: [UInt8]?
 
-  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?, kind: String, challengeKind: String?, approvedChallenge: [UInt8]?) {
+  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, profileLifetime: Double, deviceLifetime: Double, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?, kind: String, challengeKind: String?, approvedChallenge: [UInt8]?) {
     self.operation = operation
     self.domain = domain
     self.profile = profile
@@ -68,6 +70,8 @@ func bytes(_ value: JSValue) -> [UInt8] {
     self.dc = dc
     self.dcDomain = dcDomain
     self.generation = generation
+    self.profileLifetime = profileLifetime
+    self.deviceLifetime = deviceLifetime
     self.account = account
     self.device = device
     self.challenge = challenge
@@ -100,18 +104,22 @@ func bytes(_ value: JSValue) -> [UInt8] {
 @JS public struct IdentityResult {
   public let id: String
   public let namespace: String
+  public let domains: [String]
   public let profile: [UInt8]
   public let proof: [UInt8]
   public let account: String
+  public let notBefore: Double
   public let expiresAt: Double
   public let devices: [DeviceInfo]
 
-  public init(id: String, namespace: String, profile: [UInt8], proof: [UInt8], account: String, expiresAt: Double, devices: [DeviceInfo]) {
+  public init(id: String, namespace: String, domains: [String], profile: [UInt8], proof: [UInt8], account: String, notBefore: Double, expiresAt: Double, devices: [DeviceInfo]) {
     self.id = id
     self.namespace = namespace
+    self.domains = domains
     self.profile = profile
     self.proof = proof
     self.account = account
+    self.notBefore = notBefore
     self.expiresAt = expiresAt
     self.devices = devices
   }
@@ -121,7 +129,10 @@ JavaScriptEventLoop.installGlobalExecutor()
 @JS public func identityOperation(input: IdentityRequest, crypto: JSObject) async throws(JSException) -> IdentityResult {
     do {
       guard input.now.isFinite, input.now >= 0, input.now <= 9007199254740991,
-        let generation = UInt64(input.generation), generation > 0 else {
+        let generation = UInt64(input.generation), generation > 0,
+        let profileLifetime = UInt64(exactly: input.profileLifetime), profileLifetime > 0,
+        let deviceLifetime = UInt64(exactly: input.deviceLifetime), deviceLifetime >= profileLifetime,
+        deviceLifetime <= 9007199254740991 - UInt64(input.now) else {
         throw BlahError.invalidProfile
       }
       let backend = BrowserBackend(now: UInt64(input.now), crypto: crypto)
@@ -134,13 +145,15 @@ JavaScriptEventLoop.installGlobalExecutor()
       var identity: Identity
       if input.operation == "create" {
         let data = try HostedProfile(kind: kind,
-          home: Home(dc: dc, epoch: 1, expiresAt: backend.now + 30 * 86400),
+          home: Home(dc: dc, epoch: 1, expiresAt: backend.now + deviceLifetime),
           domains: [ProfileDomain(domain)]).encoded()
         guard let identityKey else { throw DiemError.identityKeyRequired }
-        identity = try await Identity(data: data, identityKey: identityKey, deviceKey: deviceKey, using: backend)
+        identity = try await Identity(data: data, identityKey: identityKey, deviceKey: deviceKey,
+          profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       } else {
         identity = try await Identity(profile: Profile(encoding: input.profile),
-          deviceKey: deviceKey, identityKey: identityKey, using: backend)
+          deviceKey: deviceKey, identityKey: identityKey,
+          profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       }
       var hosted = try HostedProfile(identity.profile, kind: kind)
       guard let home = hosted.home, home.dc == dc, hosted.domains.contains(where: { $0.name == domain })
@@ -148,7 +161,7 @@ JavaScriptEventLoop.installGlobalExecutor()
       var proof: [UInt8] = []
       switch input.operation {
       case "renew":
-        hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + 30 * 86400, account: home.account)
+        hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + deviceLifetime, account: home.account)
         try await identity.renew()
         try await identity.update(data: hosted.encoded())
       case "account":
@@ -167,9 +180,10 @@ JavaScriptEventLoop.installGlobalExecutor()
       }
       let namespace = try ClientNamespace(profile: identity.profile,
         dc: DCAddress(domain: input.dcDomain, id: dc), generation: generation)
-      return IdentityResult(id: identity.id.description, namespace: namespace.identifier,
+      return IdentityResult(id: identity.id.description, namespace: namespace.identifier, domains: hosted.domains.map { $0.name },
         profile: identity.profile.encoding, proof: proof,
         account: hosted.home?.account.map(String.init) ?? "",
+        notBefore: Double(identity.profile.validity.notBefore),
         expiresAt: Double(identity.profile.validity.expiresAt),
         devices: deviceInfo(identity))
     } catch {

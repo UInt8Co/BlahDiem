@@ -31,7 +31,8 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
         typeof input.dcDomain !== 'string' || input.dcDomain.length > 253 ||
         typeof input.generation !== 'string' || !/^[1-9][0-9]{0,19}$/.test(input.generation) ||
         !validTime(input.now)) throw new TypeError('Invalid identity request');
-      const request = {...input};
+      const request = {...input, profileLifetime: input.profileLifetime ?? 180 * 86400,
+        deviceLifetime: input.deviceLifetime ?? 180 * 86400};
       for(const name of optional) request[name] ??= null;
       for(const name of ['dc', 'profile', 'device', 'challenge', 'query', 'approvedChallenge']) {
         if(request[name] === null && optional.includes(name)) continue;

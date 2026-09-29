@@ -21,7 +21,11 @@ Each asynchronous operation retains its own crypto backend.
 - `identityOperation` manages hosted `user`, `channel`, `bot` and `stickerSet`
   identities. Specify `kind` and an operation: `create`, `inspect`, `renew`,
   `account`, `addDevice`, `removeDevice` or `prove`. Native profile rules validate
-  names, account numbers, homes and devices.
+  names, account numbers, homes and devices. `profileLifetime` and `deviceLifetime`
+  are positive integer seconds, defaulting to 180 days. Profile lifetime must not
+  exceed device lifetime. Results include ordered profile domains and profile/device validity intervals;
+  callers own renewal scheduling and publication. Renewal also extends the home
+  delegation to the device expiry.
 - `dcSetup` creates a DC identity or renews an existing one using encoded DC data.
   It returns the signed public profile and the operator device's certificate validity
   (`notBefore` and `expiresAt`, Unix seconds). No server device is created or certified.

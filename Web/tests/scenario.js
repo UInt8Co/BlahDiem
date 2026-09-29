@@ -37,6 +37,10 @@ export async function run() {
   check(first.id !== second.id && first.namespace !== second.namespace, 'Concurrent signers were mixed');
   const perform = (operation, extra = {}, profile = first.profile) => diem.identityOperation({...base, operation, profile, ...extra}, alice);
   check((await perform('inspect')).id === first.id, 'Profile round trip');
+  check(first.domains[0] === base.domain, 'Profile domain order');
+  for(const change of [{profileLifetime: 0}, {profileLifetime: 1.5}, {deviceLifetime: 1}, {deviceLifetime: Infinity}]) {
+    await rejects(() => perform('renew', change));
+  }
   await rejects(() => diem.identityOperation({...base, operation: 'inspect', profile: first.profile}, bob));
   await rejects(() => perform('not-an-operation'));
   await rejects(() => perform('inspect', {now: NaN}));
@@ -54,7 +58,12 @@ export async function run() {
   const numbered = await perform('account', {account: '1000000'});
   check(numbered.account === '1000000', 'Account assignment');
   const renewed = await perform('renew', {now: base.now + 10}, numbered.profile);
+  check(first.expiresAt - first.notBefore === 180 * 86400, 'Default profile lifetime');
+  check(first.devices[0].expiresAt - first.devices[0].notBefore === 180 * 86400, 'Default device lifetime');
   check(renewed.expiresAt > first.expiresAt, 'Profile renewal');
+  const custom = await perform('renew', {now: base.now + 20, profileLifetime: 60 * 86400, deviceLifetime: 90 * 86400}, renewed.profile);
+  check(custom.expiresAt - custom.notBefore === 60 * 86400, 'Custom profile lifetime');
+  check(custom.devices[0].expiresAt - custom.devices[0].notBefore === 90 * 86400, 'Custom device lifetime');
   const added = await perform('addDevice', {device: second.devices[0].key}, renewed.profile);
   check(added.devices.length === 2, 'Device authorization');
   const device = Array.from(second.devices[0].id.matchAll(/../g), ([hex]) => parseInt(hex, 16));
