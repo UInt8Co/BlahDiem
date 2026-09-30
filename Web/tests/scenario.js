@@ -1,4 +1,5 @@
 import challenge from './challenge.js';
+import {encode, decode} from './cbor.js';
 import {createDiem} from '../dist/diem.js';
 import {exerciseProfiles} from './profiles.js';
 
@@ -19,9 +20,12 @@ async function backend() {
     random: length => crypto.getRandomValues(new Uint8Array(length)),
     publicKey: role => publicKeys[role],
     sign: async(role, bytes) => new Uint8Array(await crypto.subtle.sign('Ed25519', keys[role].privateKey, new Uint8Array(bytes))),
-    verify: async(key, bytes, signature) => crypto.subtle.verify('Ed25519',
-      await crypto.subtle.importKey('raw', new Uint8Array(key), 'Ed25519', false, ['verify']),
-      new Uint8Array(signature), new Uint8Array(bytes))
+    verify: async(key, bytes, signature) => {
+      const algorithm = key.length === 65 ? {name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256'} : 'Ed25519';
+      return crypto.subtle.verify(algorithm,
+        await crypto.subtle.importKey('raw', new Uint8Array(key), algorithm, false, ['verify']),
+        new Uint8Array(signature), new Uint8Array(bytes));
+    }
   };
 }
 
@@ -82,6 +86,22 @@ export async function run() {
   const device = Array.from(second.devices[0].id.matchAll(/../g), ([hex]) => parseInt(hex, 16));
   const removed = await perform('removeDevice', {device}, added.profile);
   check(removed.devices.length === 1, 'Device revocation');
+  // A native Secure Enclave device uses P-256, including its profile signature.
+  const p256 = await crypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, true, ['sign', 'verify']);
+  const keyShape = decode(second.devices[0].key);
+  keyShape[3] = 2;
+  keyShape[4] = new Uint8Array(await crypto.subtle.exportKey('raw', p256.publicKey));
+  const nativeKey = encode(keyShape);
+  const native = await perform('addDevice', {device: nativeKey}, removed.profile);
+  const envelope = decode(native.profile);
+  const signed = decode(envelope[4]);
+  const fields = decode(signed[0]);
+  fields[4] = new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(nativeKey)));
+  const message = new Uint8Array(encode(fields));
+  const signature = new Uint8Array(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, p256.privateKey, message));
+  envelope[4] = new Uint8Array(encode([message, signature]));
+  const inspected = await perform('inspect', {}, encode(envelope));
+  check(inspected.devices.length === 2, 'Secure Enclave profile verification');
   // The optimized build must still reject tampered canonical profiles.
   const corrupt = [...removed.profile]; corrupt[corrupt.length - 1] ^= 1;
   await rejects(() => perform('inspect', {}, corrupt));

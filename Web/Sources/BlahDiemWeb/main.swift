@@ -21,7 +21,7 @@ struct BrowserBackend: CryptoBackend, @unchecked Sendable {
     }
   }
   func isValidSignature(_ signature: [UInt8], for message: [UInt8], by key: PublicKey) async throws -> Bool {
-    guard key.algorithm == .ed25519 else { throw DiemError.unsupportedAlgorithm }
+    guard key.algorithm == .ed25519 || key.algorithm == .p256 else { throw DiemError.unsupportedAlgorithm }
     return try await JSPromise(crypto.verify!(
       key.rawRepresentation, message, signature).object!)!.value.boolean!
   }

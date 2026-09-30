@@ -2,7 +2,7 @@
 
 The WASM library runs BlahDiem's canonical profile and proof rules in windows,
 dedicated workers and shared workers. BridgeJS generates the JavaScript ABI and
-TypeScript declarations. WebCrypto supplies Ed25519 signing and verification;
+TypeScript declarations. WebCrypto supplies Ed25519 signing and Ed25519/P-256 verification;
 private-key custody, backups, profile hosting and user consent belong to the caller.
 
 ```js
