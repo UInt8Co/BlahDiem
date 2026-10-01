@@ -19,7 +19,7 @@ struct HostedProfile {
     case .channel(let p) where kind == "channel": home = p.home; domains = p.domains
     case .bot(let p) where kind == "bot": home = p.home; domains = p.domains
     case .stickerSet(let p) where kind == "stickerSet":
-      home = p.home; domains = [try ProfileDomain(p.shortName, isUsername: true)]
+      home = p.home; domains = [try ProfileDomain(p.shortName)]
     default: throw BlahError.invalidProfile
     }
   }

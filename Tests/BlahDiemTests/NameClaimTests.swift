@@ -17,10 +17,10 @@ import Testing
     #expect(numbered.home?.account == 1_000_001 && numbered.username == "alice.one.example")
 
     parsed.username = nil
-    #expect(try UserProfile(try await identity.update(parsed)).domains.map(\.name) == ["id.one.example"])
+    #expect(try UserProfile(try await identity.update(parsed)).domains.map(\.name) == [])
   }
 
-  @Test func namesAreDomainsAndABotsFirstLabelEndsInBot() throws {
+  @Test func allProfileDomainsAreUsernameCandidates() throws {
     for name in ["alice", "Alice.example", "ali_ce.example", "-a.example", "a-.example", "a..example", "a.example.",
       "álîce.example", "alice.例え", "alice.💬", "a.\u{212A}", String(repeating: "a", count: 64) + ".example"] {
       #expect(throws: BlahError.invalidName) { try ProfileDomain(name) }
@@ -30,7 +30,7 @@ import Testing
     }
     var bot = BotProfile(home: Fixture.home(account: 1_000_002))
     bot.username = "helper.one.example"
-    #expect(throws: BlahError.invalidName) { try bot.encoded() }
+    #expect(try BotProfile(data: bot.encoded()) == bot)
     bot.username = "helperbot.one.example"
     #expect(try BotProfile(data: bot.encoded()) == bot)
     #expect(DomainName.normalized("Alice.Example") == "alice.example")
@@ -50,7 +50,7 @@ import Testing
     let set = StickerSetProfile(home: Fixture.home(account: 5), shortName: "cats.one.example")
     #expect(try StickerSetProfile(data: set.encoded()) == set)
     let twoNames = try UserProfile(
-      home: nil, domains: [ProfileDomain("a.example", isUsername: true), ProfileDomain("b.example")]
+      home: nil, domains: [ProfileDomain("a.example"), ProfileDomain("b.example")]
     ).encoded()
     #expect(throws: BlahError.invalidProfile) { try StickerSetProfile(data: twoNames) }
   }

@@ -4,7 +4,7 @@ import {init} from './.build-embedded/plugins/PackageToJS/outputs/Package/index.
 const operations = new Set(['create', 'inspect', 'renew', 'account', 'domains', 'addDevice', 'removeDevice', 'prove']);
 const kinds = new Set(['user', 'channel', 'bot', 'stickerSet']);
 const challengeKinds = new Set(['invocation', 'login', 'oauthConsent', 'accountLink', 'dcAdmin']);
-const optional = ['account', 'device', 'challenge', 'query', 'keyID', 'sessionID', 'expiresAt', 'challengeKind', 'approvedChallenge', 'domains', 'usernameDomains'];
+const optional = ['account', 'device', 'challenge', 'query', 'keyID', 'sessionID', 'expiresAt', 'challengeKind', 'approvedChallenge', 'domains'];
 
 function bytes(value, name, limit = 100_000) {
   if(!(Array.isArray(value) || value instanceof Uint8Array) || value.length > limit) throw new TypeError(`Invalid ${name} bytes`);
@@ -51,7 +51,7 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
       if(request.operation === 'prove' && !challengeKinds.has(request.challengeKind)) {
         throw new TypeError('Invalid challenge kind');
       }
-      for(const field of ['domains', 'usernameDomains']) {
+      for(const field of ['domains']) {
         if(request[field] !== null && (!Array.isArray(request[field]) || request[field].length > 16 ||
           request[field].some(value => typeof value !== 'string' || value.length > 253))) {
           throw new TypeError('Invalid profile domains');

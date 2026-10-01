@@ -60,17 +60,16 @@ export async function run() {
     await rejects(() => perform('prove', {...extra, ...change}));
   }
   const domains = ['alice.example.org', 'second.example.org', 'discovery.example.org'];
-  const claimed = await perform('domains', {domains, usernameDomains: domains.slice(0, 2)});
+  const claimed = await perform('domains', {domains});
   check(JSON.stringify(claimed.domains) === JSON.stringify(domains), 'Ordered domain editing');
-  check(claimed.usernameDomains.length === 2, 'Username flags returned');
-  const hidden = await perform('domains', {domains: domains.slice(1), usernameDomains: []}, claimed.profile);
-  check(hidden.domains.length === 2 && hidden.usernameDomains.length === 0, 'Remove discovery domain and disable names');
+  check(!('usernameDomains' in claimed), 'No username flag API');
+  const hidden = await perform('domains', {domains: domains.slice(1)}, claimed.profile);
+  check(hidden.domains.length === 2, 'Remove a profile domain');
   check((await perform('inspect', {domain: domains[1]}, hidden.profile)).id === first.id, 'Changed discovery domain retains identity');
   for(const change of [
-    {domains: [], usernameDomains: []},
-    {domains: [base.domain, base.domain], usernameDomains: []},
-    {domains: [base.domain], usernameDomains: ['unlisted.example.org']},
-    {domains: ['bad_domain.example.org'], usernameDomains: []}
+    {domains: []},
+    {domains: [base.domain, base.domain]},
+    {domains: ['bad_domain.example.org']}
   ]) await rejects(() => perform('domains', change));
   const numbered = await perform('account', {account: '1000000'});
   check(numbered.account === '1000000', 'Account assignment');
@@ -99,7 +98,7 @@ export async function run() {
   fields[4] = new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(nativeKey)));
   const message = new Uint8Array(encode(fields));
   const signature = new Uint8Array(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, p256.privateKey, message));
-  envelope[4] = new Uint8Array(encode([message, signature]));
+  envelope[4] = new Uint8Array(encode({0: message, 1: signature}));
   const inspected = await perform('inspect', {}, encode(envelope));
   check(inspected.devices.length === 2, 'Secure Enclave profile verification');
   // The optimized build must still reject tampered canonical profiles.

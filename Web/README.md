@@ -26,10 +26,10 @@ Each asynchronous operation retains its own crypto backend.
   exceed device lifetime. Results include ordered profile domains and profile/device validity intervals;
   callers own renewal scheduling and publication. Renewal also extends the home
   delegation to the device expiry.
-For a user, `domains` replaces the ordered domain list and `usernameDomains` selects
-which of those domains may be used as public usernames. At least one discovery domain
-remains. Results return both lists; the caller republishes the signed revision at every
-listed domain before requesting a DC profile check.
+For a user, `domains` replaces the ordered domain list. Every domain is a username
+candidate, and at least one domain remains. The caller republishes the signed revision
+at every listed domain before requesting a DC profile check. Activation and ordering
+of verified names are account settings.
 
 - `dcSetup` creates a DC identity or renews an existing one using encoded DC data.
   It returns the signed public profile and the operator device's certificate validity

@@ -62,9 +62,8 @@ func bytes(_ value: JSValue) -> [UInt8] {
   public let challengeKind: String?
   public let approvedChallenge: [UInt8]?
   public let domains: [String]?
-  public let usernameDomains: [String]?
 
-  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, profileLifetime: Double, deviceLifetime: Double, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?, kind: String, challengeKind: String?, approvedChallenge: [UInt8]?, domains: [String]? = nil, usernameDomains: [String]? = nil) {
+  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, profileLifetime: Double, deviceLifetime: Double, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?, kind: String, challengeKind: String?, approvedChallenge: [UInt8]?, domains: [String]? = nil) {
     self.operation = operation
     self.domain = domain
     self.profile = profile
@@ -85,7 +84,6 @@ func bytes(_ value: JSValue) -> [UInt8] {
     self.challengeKind = challengeKind
     self.approvedChallenge = approvedChallenge
     self.domains = domains
-    self.usernameDomains = usernameDomains
   }
 }
 
@@ -115,9 +113,8 @@ func bytes(_ value: JSValue) -> [UInt8] {
   public let notBefore: Double
   public let expiresAt: Double
   public let devices: [DeviceInfo]
-  public let usernameDomains: [String]
 
-  public init(id: String, namespace: String, domains: [String], profile: [UInt8], proof: [UInt8], account: String, notBefore: Double, expiresAt: Double, devices: [DeviceInfo], usernameDomains: [String] = []) {
+  public init(id: String, namespace: String, domains: [String], profile: [UInt8], proof: [UInt8], account: String, notBefore: Double, expiresAt: Double, devices: [DeviceInfo]) {
     self.id = id
     self.namespace = namespace
     self.domains = domains
@@ -127,7 +124,6 @@ func bytes(_ value: JSValue) -> [UInt8] {
     self.notBefore = notBefore
     self.expiresAt = expiresAt
     self.devices = devices
-    self.usernameDomains = usernameDomains
   }
 }
 
@@ -171,10 +167,8 @@ JavaScriptEventLoop.installGlobalExecutor()
         try await identity.renew()
         try await identity.update(data: hosted.encoded())
       case "domains":
-        guard kind == "user", let names = input.domains, !names.isEmpty,
-          let usernames = input.usernameDomains, Set(usernames).count == usernames.count,
-          Set(usernames).isSubset(of: Set(names)) else { throw BlahError.invalidName }
-        hosted.domains = try names.map { try ProfileDomain($0, isUsername: usernames.contains($0)) }
+        guard kind == "user", let names = input.domains, !names.isEmpty else { throw BlahError.invalidName }
+        hosted.domains = try names.map { try ProfileDomain($0) }
         try await identity.update(data: hosted.encoded())
       case "account":
         guard let account = Int64(input.account ?? ""), account > 0,
@@ -197,7 +191,7 @@ JavaScriptEventLoop.installGlobalExecutor()
         account: hosted.home?.account.map(String.init) ?? "",
         notBefore: Double(identity.profile.validity.notBefore),
         expiresAt: Double(identity.profile.validity.expiresAt),
-        devices: deviceInfo(identity), usernameDomains: hosted.domains.filter { $0.isUsername }.map { $0.name })
+        devices: deviceInfo(identity))
     } catch {
       throw JSException(message: bridgeError(error))
     }

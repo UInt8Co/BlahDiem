@@ -16,7 +16,9 @@ export function encode(value) {
     return [...head(3, bytes.length), ...bytes];
   }
   if(value instanceof Uint8Array) return [...head(2, value.length), ...value];
-  return [...head(4, value.length), ...value.flatMap(encode)];
+  if(Array.isArray(value)) return [...head(4, value.length), ...value.flatMap(encode)];
+  const entries = Object.entries(value).sort(([a], [b]) => Number(a) - Number(b));
+  return [...head(5, entries.length), ...entries.flatMap(([key, field]) => [...encode(BigInt(key)), ...encode(field)])];
 }
 
 export function decode(input) {
@@ -33,6 +35,7 @@ export function decode(input) {
     }
     if(major === 0) return length <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(length) : length;
     if(major === 4) return Array.from({length: Number(length)}, read);
+    if(major === 5) return Object.fromEntries(Array.from({length: Number(length)}, () => [read(), read()]));
     const value = bytes.slice(offset, offset += Number(length));
     if(major === 2) return value;
     if(major === 3) return new TextDecoder().decode(value);

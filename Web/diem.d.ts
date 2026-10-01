@@ -3,7 +3,7 @@ export type {IdentityRequest, IdentityResult, DeviceInfo, DCSetupRequest, DCSetu
 
 /** The runtime normalizes omitted optional values and typed byte arrays before BridgeJS. */
 type OptionalIdentityField = 'account' | 'device' | 'challenge' | 'query' | 'keyID' | 'sessionID' | 'expiresAt'
-  | 'challengeKind' | 'approvedChallenge' | 'domains' | 'usernameDomains' | 'profileLifetime' | 'deviceLifetime';
+  | 'challengeKind' | 'approvedChallenge' | 'domains' | 'profileLifetime' | 'deviceLifetime';
 type InputValue<T> = T extends number[] ? number[] | Uint8Array : T;
 type IdentityInputFields = {[K in keyof IdentityRequest]: InputValue<IdentityRequest[K]>};
 export type IdentityInput = Omit<IdentityInputFields, OptionalIdentityField>

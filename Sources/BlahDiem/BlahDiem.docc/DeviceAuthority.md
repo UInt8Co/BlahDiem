@@ -32,16 +32,16 @@ WebCrypto lacks them.
 A `Profile` carries a ``BlahProfile`` as its data. A hosted identity names its
 ``Home``: the DC's identity ID, the epoch of the hosting and, once allocated, the account
 number. A later epoch is a new account. Its ``ProfileDomain`` list names the domains that
-serve the profile; a flagged domain is a public name.
+serve the profile; every listed domain is a public username candidate. Verification and
+activation belong to the home DC.
 
 A ``DCProfile`` advertises client and BIDCOM endpoints, the RSA transport key and
-database namespace generation. Each endpoint is encoded as
-`[host, port, tls, transport, path]`: transport 0 is TCP with a null path; transport 1
+database namespace generation. Endpoints use integer-keyed maps: transport 0 is TCP
+with a null path; transport 1
 is WebSocket with an absolute HTTP path, optionally including a query. TLS is explicit
 for either transport. The endpoint lists are bounded and contain no duplicates;
 BIDCOM accepts TCP only and can be empty. Clients verify the enclosing Diem profile
-and its discovery domain before using these values. This replaces the earlier three-field
-endpoint encoding.
+and its discovery domain before using these values. The field keys and validation belong to ``DCProfile``.
 
 ## Proofs
 

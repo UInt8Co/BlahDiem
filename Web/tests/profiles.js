@@ -9,7 +9,7 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const content = profile => decode(decode(decode(profile)[4])[0]);
   const data = profile => decode(content(profile)[9]);
   const verify = async(result, signer, statement) => {
-    const [message, signature] = decode(result.proof);
+    const {0: message, 1: signature} = decode(result.proof);
     check(await signer.verify(signer.publicKey('device'), message, signature), 'Proof signature');
     const proof = decode(message);
     check(equal(proof[2], fromHex(result.id)), 'Proof identity binding');
@@ -36,14 +36,14 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     const removed = await perform('removeDevice', {device: fromHex(second.devices[0].id)}, added.profile);
     check(added.devices.length === 2 && removed.devices.length === 1, `${kind} devices`);
     await rejects(() => perform('account', {account: kind === 'channel' ? '997852516352' : '9223372036854775807'}));
-    const invocation = encode([4, 1, domain, nonce, expires, dc, keyID, sessionID]);
+    const invocation = encode({0: 4, 1: 1, 2: domain, 3: nonce, 4: expires, 5: dc, 6: keyID, 7: sessionID});
     const query = bytes([1, 2, 3, 4]);
     const invokeExtra = {challengeKind: 'invocation', challenge: invocation, approvedChallenge: invocation,
       expiresAt: expires, keyID: String(keyID), sessionID: String(sessionID), query};
     const info = diem.inspectChallenge('invocation', invocation);
     check(info.keyID === String(keyID) && info.domain === domain, 'Challenge inspection');
     await verify(await perform('prove', invokeExtra), signer,
-      encode([5, 1, bytes(invocation), 1, new Uint8Array(await crypto.subtle.digest('SHA-512', query))]));
+      encode({0: 5, 1: 1, 2: bytes(invocation), 3: 1, 4: new Uint8Array(await crypto.subtle.digest('SHA-512', query))}));
     await diem.identityOperation({...request, operation: 'prove', profile: created.profile, ...invokeExtra}, {
       ...signer, publicKey: role => {
         check(role === 'device', 'Proof requested the identity key');
@@ -55,13 +55,10 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
 
     const profileDigest = new Uint8Array(await crypto.subtle.digest('SHA-256', decode(decode(created.profile)[4])[0]));
     const challenges = [
-      ['login', [3, 1, 1, nonce, expires, fromHex(created.id), fromHex(created.devices[0].id), profileDigest,
-        base.dcDomain, dc, keyID, sessionID]],
-      ['oauthConsent', [6, 1, base.dcDomain, dc, nonce, expires, 42, 'Example app', 9007199254740993n,
-        'https://app.example.org/callback', ['openid', 'profile'], 'a'.repeat(43), 'state', 'oidc-nonce']],
-      ['accountLink', [8, 1, base.dcDomain, dc, nonce, expires, 3, 1, fromHex(created.id), nonce,
-        '9007199254740993', '123', 'External account']],
-      ['dcAdmin', [9, 1, base.dcDomain, dc, nonce, expires, 2, 9007199254740993n, bytes([123, 125])]]
+      ['login', {0: 3, 1: 1, 2: 1, 3: nonce, 4: expires, 5: fromHex(created.id), 6: fromHex(created.devices[0].id), 7: profileDigest, 8: base.dcDomain, 9: dc, 10: keyID, 11: sessionID}],
+      ['oauthConsent', {0: 6, 1: 1, 2: base.dcDomain, 3: dc, 4: nonce, 5: expires, 6: 42, 7: 'Example app', 8: 9007199254740993n, 9: 'https://app.example.org/callback', 10: ['openid', 'profile'], 11: 'a'.repeat(43), 12: 'state', 13: 'oidc-nonce'}],
+      ['accountLink', {0: 8, 1: 1, 2: base.dcDomain, 3: dc, 4: nonce, 5: expires, 6: 3, 7: 1, 8: fromHex(created.id), 9: nonce, 10: '9007199254740993', 11: '123', 12: 'External account'}],
+      ['dcAdmin', {0: 9, 1: 1, 2: base.dcDomain, 3: dc, 4: nonce, 5: expires, 6: 2, 7: 9007199254740993n, 8: bytes([123, 125])}]
     ];
     for(const [challengeKind, fields] of challenges) {
       const challenge = encode(fields);
@@ -73,20 +70,22 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
       const extra = {challengeKind, challenge, approvedChallenge: challenge, expiresAt: expires,
         keyID: String(keyID), sessionID: String(sessionID)};
       await verify(await perform('prove', extra), signer, challenge);
-      await rejects(() => perform('prove', {...extra, approvedChallenge: encode([...fields, 0])}));
+      await rejects(() => perform('prove', {...extra, approvedChallenge: encode({...fields, 100: 0})}));
       await rejects(() => perform('prove', {...extra, now: expires}));
       await rejects(() => perform('prove', {...extra, dcDomain: 'other.example.org'}));
-      await rejects(() => diem.inspectChallenge(challengeKind, encode([...fields, 0])));
+      diem.inspectChallenge(challengeKind, encode({...fields, 100: 0}));
+      const extended = encode({...fields, 100: 0});
+      await verify(await perform('prove', {...extra, challenge: extended, approvedChallenge: extended}), signer, extended);
       if(challengeKind === 'login') {
         await rejects(() => perform('prove', {...extra, keyID: '1'}));
-        const wrong = [...fields]; wrong[6] = new Uint8Array(32);
+        const wrong = {...fields}; wrong[6] = new Uint8Array(32);
         await rejects(() => perform('prove', {...extra, challenge: encode(wrong), approvedChallenge: encode(wrong)}));
       }
     }
   }
 
-  const dcData = encode([13, 1, 5, ['dc.example.org'], [['dc.example.org', 443, true, 1, '/apiws']],
-    [['dc.example.org', 8443, true, 0, null]], 'transport-public-key', 1]);
+  const dcData = encode({0: 13, 1: 1, 2: 5, 3: ['dc.example.org'], 4: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
+    5: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 6: 'transport-public-key', 7: 1});
   const input = {data: dcData, profile: null, now: base.now};
   const created = await diem.dcSetup(input, alice);
   check(data(created.profile)[2] === 5 && created.devices.length === 1, 'DC creation without a server device');

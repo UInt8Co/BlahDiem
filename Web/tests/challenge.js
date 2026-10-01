@@ -1,3 +1,8 @@
-// Independent canonical InvocationChallenge fixture, not produced by the WASM under test.
-// [4, 1, domain, nonce, expiresAt, dc, transportKeyID, sessionID]
-export default [136,4,1,113,97,108,105,99,101,46,101,120,97,109,112,108,101,46,111,114,103,88,32,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,26,107,73,210,60,88,32,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,42,27,255,255,255,255,255,255,255,254,27,255,255,255,255,255,255,255,253];
+import {encode} from './cbor.js';
+
+// Independent integer-keyed InvocationChallenge fixture.
+export default encode({
+  0: 4, 1: 1, 2: 'alice.example.org', 3: new Uint8Array(32).fill(7),
+  4: 1800000060, 5: new Uint8Array(32).fill(42),
+  6: 18446744073709551614n, 7: 18446744073709551613n
+});
