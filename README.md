@@ -6,7 +6,8 @@ devices sign, and the client cache namespace. Blah clients and DCs share it. It 
 Foundation-free and runs on any Diem `CryptoBackend`.
 
 Blah records are canonical CBOR maps with unsigned integer field keys and fixed numeric
-tags. Decoders validate required fields and accept unknown integer keys; arrays contain
+tags. Record types expose their field numbers as public static `cborKey…` constants.
+Decoders validate required fields and accept unknown integer keys; arrays contain
 lists only. The tuple encoding is not accepted. Every profile domain is a username candidate.
 
 See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md).
