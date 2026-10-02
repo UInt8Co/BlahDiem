@@ -89,6 +89,23 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const input = {data: dcData, profile: null, now: base.now};
   const created = await diem.dcSetup(input, alice);
   check(data(created.profile)[2] === 5 && created.devices.length === 1, 'DC creation without a server device');
+  const dcRequest = {...base, kind: 'user', domain: 'dc.example.org', dcDomain: 'dc.example.org',
+    dc: fromHex(created.id), profile: created.profile};
+  const operateDC = (operation, extra = {}) => diem.identityOperation({...dcRequest, operation, ...extra}, alice);
+  const account = await operateDC('inspect');
+  check(account.account === '777000' && account.id === created.id, 'DC is a fixed user account');
+  await operateDC('inspect', {kind: 'dc'});
+  const dcInvocation = encode({0: 4, 1: 1, 2: dcRequest.domain, 3: nonce, 4: expires,
+    5: fromHex(created.id), 6: keyID, 7: sessionID});
+  const dcQuery = bytes([1, 2, 3, 4]);
+  await verify(await operateDC('prove', {challengeKind: 'invocation', challenge: dcInvocation,
+    approvedChallenge: dcInvocation, expiresAt: expires, keyID: String(keyID), sessionID: String(sessionID),
+    query: dcQuery}), alice, encode({0: 5, 1: 1, 2: bytes(dcInvocation), 3: 1,
+    4: new Uint8Array(await crypto.subtle.digest('SHA-512', dcQuery))}));
+  const dcRenewed = await operateDC('renew', {now: base.now + 10});
+  check(data(dcRenewed.profile)[2] === 5 && dcRenewed.account === '777000', 'User renewal preserves DC kind');
+  await rejects(() => operateDC('account', {account: '1000000'}));
+  await rejects(() => operateDC('inspect', {dc: base.dc}));
   check(created.expiresAt === base.now + 90 * 86400, 'Default 90-day DC profile');
   check(created.devices.every(device => device.notBefore === base.now && device.expiresAt === base.now + 90 * 86400), 'Default 90-day DC certificate');
   const discovered = await diem.verifyDCProfile('dc.example.org', created.profile, base.now, {verify: alice.verify});

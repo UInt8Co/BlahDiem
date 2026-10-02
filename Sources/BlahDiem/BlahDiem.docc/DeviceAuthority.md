@@ -36,7 +36,11 @@ serve the profile; every listed domain is a public username candidate. Verificat
 activation belong to the home DC.
 
 A ``DCProfile`` advertises client and BIDCOM endpoints, the RSA transport key and
-database namespace generation. Endpoints use integer-keyed maps: transport 0 is TCP
+database namespace generation. It also represents a special user account, permanently
+hosted by its own identity as account 777000 in epoch 1. The enclosing signed profile
+supplies that identity and the hosting's expiry; no independent home can move it elsewhere.
+`Profile.blahHome` is the common hosting view used by proofs and client namespaces.
+Endpoints use integer-keyed maps: transport 0 is TCP
 with a null path; transport 1
 is WebSocket with an absolute HTTP path, optionally including a query. TLS is explicit
 for either transport. The endpoint lists are bounded and contain no duplicates;

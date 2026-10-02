@@ -5,6 +5,28 @@ import Testing
 @Suite struct WireContractTests {
   let backend = TestBackend()
 
+  @Test func dcProfilesHaveAFixedUserHostingForProofsAndNamespaces() async throws {
+    let data = DCProfile(domains: ["one.example"],
+      endpoints: [.init(host: "one.example", port: 443, tls: true)],
+      bidcomEndpoints: [], transportPublicKey: "rsa", namespaceGeneration: 12)
+    let identity = try await Identity(data, using: backend)
+    let destination = try DCAddress(domain: "one.example", id: identity.id)
+    let home = try #require(try identity.profile.blahHome)
+    #expect(home.dc == identity.id && home.account == 777000 && home.epoch == 1)
+    #expect(home.expiresAt == identity.profile.validity.expiresAt)
+    let namespace = try ClientNamespace(profile: identity.profile, dc: destination, generation: 12)
+    try namespace.require(identity.profile)
+    #expect(throws: BlahError.wrongHome) {
+      try ClientNamespace(profile: identity.profile, dc: Fixture.dc, generation: 12)
+    }
+    let challenge = try LoginChallenge(operation: .signIn, nonce: Fixture.nonce,
+      expiresAt: backend.now + 60, identityID: identity.id,
+      deviceID: identity.deviceKey.publicKey.id, profileDigest: identity.profile.digest,
+      dc: destination, authKeyID: 42, sessionID: 73)
+    let proof = try await identity.prove(challenge)
+    try await proof.verify(against: identity.profile, using: backend)
+  }
+
   @Test func challengeTagsAndPositionsAreExact() throws {
     let login = try LoginChallenge(
       operation: .signIn, nonce: Fixture.nonce, expiresAt: 5, identityID: Fixture.dcID,

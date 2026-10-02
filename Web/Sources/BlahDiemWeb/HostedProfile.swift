@@ -5,6 +5,8 @@ struct HostedProfile {
   let kind: String
   var home: Home?
   var domains: [ProfileDomain]
+  private var dc: DCProfile?
+  private var dcHome: Home?
 
   init(kind: String, home: Home?, domains: [ProfileDomain]) {
     self.kind = kind
@@ -18,6 +20,11 @@ struct HostedProfile {
     case .user(let p) where kind == "user": home = p.home; domains = p.domains
     case .channel(let p) where kind == "channel": home = p.home; domains = p.domains
     case .bot(let p) where kind == "bot": home = p.home; domains = p.domains
+    case .dc(let p) where kind == "user" || kind == "dc":
+      home = try profile.blahHome
+      dcHome = home
+      dc = p
+      domains = try p.domains.map { try ProfileDomain($0) }
     case .stickerSet(let p) where kind == "stickerSet":
       home = p.home; domains = [try ProfileDomain(p.shortName)]
     default: throw BlahError.invalidProfile
@@ -25,6 +32,12 @@ struct HostedProfile {
   }
 
   func encoded() throws -> [UInt8] {
+    if var dc {
+      guard home?.dc == dcHome?.dc, home?.epoch == dcHome?.epoch,
+        home?.account == DCProfile.accountID else { throw BlahError.wrongHome }
+      dc.domains = domains.map { $0.name }
+      return try dc.encoded()
+    }
     switch kind {
     case "user": return try UserProfile(home: home, domains: domains).encoded()
     case "channel": return try ChannelProfile(home: home, domains: domains).encoded()

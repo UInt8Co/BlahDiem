@@ -79,6 +79,6 @@ extension Identity {
   }
 
   func requireHome(_ dc: Digest) throws(BlahError) {
-    guard (try? AnyBlahProfile(profile))?.home?.dc == dc else { throw .wrongHome }
+    guard (try? profile.blahHome)?.dc == dc else { throw .wrongHome }
   }
 }

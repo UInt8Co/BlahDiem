@@ -2,7 +2,7 @@
 import {init} from './.build-embedded/plugins/PackageToJS/outputs/Package/index.js';
 
 const operations = new Set(['create', 'inspect', 'renew', 'account', 'domains', 'addDevice', 'removeDevice', 'prove']);
-const kinds = new Set(['user', 'channel', 'bot', 'stickerSet']);
+const kinds = new Set(['user', 'channel', 'bot', 'stickerSet', 'dc']);
 const challengeKinds = new Set(['invocation', 'login', 'oauthConsent', 'accountLink', 'dcAdmin']);
 const optional = ['account', 'device', 'challenge', 'query', 'keyID', 'sessionID', 'expiresAt', 'challengeKind', 'approvedChallenge', 'domains'];
 

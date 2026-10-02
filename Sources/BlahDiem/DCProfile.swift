@@ -1,5 +1,8 @@
 /// A DC's public profile: where clients and peer DCs reach it.
 public struct DCProfile: BlahProfile {
+  /// A DC's user account is permanently hosted by that same identity.
+  public static let accountID: Int64 = 777000
+  public static let accountEpoch: UInt64 = 1
   /// CBOR field keys.
   public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
   public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion

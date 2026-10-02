@@ -20,7 +20,7 @@ public struct ClientNamespace: Hashable, Sendable {
   /// home is `dc`.
   public init(profile: Profile, dc: DCAddress, generation: UInt64) throws(BlahError) {
     guard (1...UInt64(Int64.max)).contains(generation) else { throw .wrongNamespace }
-    guard let home = (try? AnyBlahProfile(profile))?.home, home.dc == dc.id else {
+    guard let home = try? profile.blahHome, home.dc == dc.id else {
       throw .wrongHome
     }
     identityID = profile.id
@@ -44,7 +44,7 @@ public struct ClientNamespace: Hashable, Sendable {
 
   /// Throws unless `profile` belongs to this namespace.
   public func require(_ profile: Profile) throws(BlahError) {
-    guard let home = (try? AnyBlahProfile(profile))?.home, home.dc == dc.id else {
+    guard let home = try? profile.blahHome, home.dc == dc.id else {
       throw .wrongHome
     }
     guard profile.id == identityID, home.epoch == homeEpoch else { throw .wrongNamespace }

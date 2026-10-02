@@ -219,6 +219,21 @@ public enum AnyBlahProfile: Hashable, Sendable {
   }
 }
 
+extension Profile {
+  /// The account hosting represented by this signed profile. A DC is a special
+  /// user permanently hosted by itself; its hosting expires with the profile.
+  public var blahHome: Home? {
+    get throws(BlahError) {
+      switch try AnyBlahProfile(self) {
+      case .dc:
+        Home(dc: id, epoch: DCProfile.accountEpoch, expiresAt: validity.expiresAt,
+          account: DCProfile.accountID)
+      case let profile: profile.home
+      }
+    }
+  }
+}
+
 extension [ProfileDomain] {
   fileprivate var username: String? {
     get { first?.name }

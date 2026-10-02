@@ -31,6 +31,10 @@ candidate, and at least one domain remains. The caller republishes the signed re
 at every listed domain before requesting a DC profile check. Activation and ordering
 of verified names are account settings.
 
+An existing DC profile is also accepted as a `user` (or `dc`) identity for inspection,
+device management, renewal and proofs. It remains a DC profile, permanently hosted by
+itself as account 777000. DC creation uses `dcSetup`; changing its account or home is refused.
+
 - `dcSetup` creates a DC identity or renews an existing one using encoded DC data.
   It returns the signed public profile and the operator device's certificate validity
   (`notBefore` and `expiresAt`, Unix seconds). No server device is created or certified.
