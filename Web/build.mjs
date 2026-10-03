@@ -48,7 +48,7 @@ await copyFile(`${generated}bridge-js.d.ts`, `${output}bridge-js.d.ts`);
 await copyFile(`${web}diem.d.ts`, `${output}diem.d.ts`);
 await copyFile(`${root}LICENSE`, `${output}LICENSE`);
 const swiftResources = JSON.parse(run(swift, ['-print-target-info'], {encoding: 'utf8'})).paths.runtimeResourcePath;
-const notices = await Promise.all([resolve(swiftResources, '../../share/swift/LICENSE.txt'), `${scratch}/checkouts/JavaScriptKit/LICENSE`, `${web}node_modules/@bjorn3/browser_wasi_shim/LICENSE-MIT`, `${diem}/LICENSE`].map(path => readFile(path, 'utf8')));
+const notices = await Promise.all([resolve(swiftResources, '../../share/swift/LICENSE.txt'), `${scratch}/checkouts/JavaScriptKit/LICENSE`, `${web}node_modules/@bjorn3/browser_wasi_shim/LICENSE-MIT`, `${web}node_modules/@hpke/core/LICENSE`, `${web}node_modules/@hpke/core/../common/LICENSE`, `${diem}/LICENSE`].map(path => readFile(path, 'utf8')));
 await writeFile(`${output}THIRD_PARTY_LICENSES`, notices.map(text => text.trimEnd()).join('\n\n---\n\n') + '\n');
 await copyFile(`${web}README.md`, `${output}README.md`);
 await writeFile(`${output}package.json`, JSON.stringify({name: '@blahim/diem-web', version: process.env.GITHUB_REF_NAME?.match(/^web-v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)$/)?.[1] || '0.0.0-dev', type: 'module',
@@ -67,7 +67,8 @@ for(const name of ['diem.js', 'diem.wasm', 'diem.d.ts', 'bridge-js.d.ts', 'packa
     }
   }
 }
-if(files['diem.wasm'].bytes > 400_000 || files['diem.wasm.br'].bytes > 150_000 || files['diem.js'].bytes > 60_000) {
+// Includes the canonical key-file codec and the bundled, offline HPKE implementation.
+if(files['diem.wasm'].bytes > 450_000 || files['diem.wasm.br'].bytes > 165_000 || files['diem.js'].bytes > 105_000) {
   throw new Error('Web artifact exceeds its size budget; inspect before releasing.');
 }
 const source = {repository: 'https://github.com/UInt8Co/BlahDiem',

@@ -3,7 +3,8 @@
 The WASM library runs BlahDiem's canonical profile and proof rules in windows,
 dedicated workers and shared workers. BridgeJS generates the JavaScript ABI and
 TypeScript declarations. WebCrypto supplies Ed25519 signing and Ed25519/P-256 verification;
-private-key custody, backups, profile hosting and user consent belong to the caller.
+BlahDiem owns password-protected CBOR key files and key serialization. Applications own
+storage, unlock lifetimes, profile hosting and user consent.
 
 ```js
 import {createDiem} from './diem.js';
@@ -58,6 +59,23 @@ current `keyID` and `sessionID`; invocation proofs bind the exact `query` bytes.
 The library checks the home, expiry, identity/device binding and native statement
 rules before signing. Proofs need only the device signer; identity keys certify
 and manage devices. Invalid requests reject without replacing another call's signer.
+
+## Key files
+
+`keyFiles.create(password)` returns an unlocked custody session. `session.seal(contents)`
+produces a binary CBOR file; `keyFiles.unlock(bytes, password)` verifies and opens a file,
+returning `{session, contents}`. `session.open(bytes)` and `session.seal(contents)` reuse
+the unlocked recipient without retaining the password or repeating PBKDF2. Call
+`session.destroy()` when locking or discarding a session. In-flight operations must finish
+before the application considers its custody locked. `keyFiles.inspect(bytes)` returns
+unverified display identity and salt only; it never grants authority.
+
+Use `generateSigningKey()` for browser Ed25519 keys. Contents include the signed profile
+and identity and/or device keys; `diem.d.ts` owns the browser shape. Recovery files can
+contain only an identity key, device files only a device key, and browser backups both.
+The native `KeyFile` contract defines the CBOR and password/HPKE rules. The bundled
+`@hpke/core` implementation uses WebCrypto and requires no external script requests.
+Downloads use `.cbor` and `application/cbor`. JSON files are rejected.
 
 ## Vendoring a release
 

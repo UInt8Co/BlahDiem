@@ -1,5 +1,5 @@
 import {createServer} from 'node:http';
-import {readFile} from 'node:fs/promises';
+import {readFile, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import assert from 'node:assert/strict';
@@ -21,10 +21,12 @@ try {
   const page = await browser.newPage();
   page.on('pageerror', error => console.error(error));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  assert.equal((await page.evaluate(async() => Promise.race([
+  const windowResult = await page.evaluate(async() => Promise.race([
     (await import('/tests/scenario.js')).run(),
     new Promise((_, reject) => setTimeout(() => reject(new Error('Window test timed out')), 30_000))
-  ]))).realm, 'window');
+  ]));
+  assert.equal(windowResult.realm, 'window');
+  if(process.env.BLAH_KEY_FILE_VECTOR) await writeFile(process.env.BLAH_KEY_FILE_VECTOR, JSON.stringify({file: windowResult.keyFile}) + '\n');
   for(const shared of [false, true]) {
     const result = await page.evaluate(shared => new Promise((resolve, reject) => {
       const worker = shared ? new SharedWorker('/tests/worker.js', {type: 'module'}) : new Worker('/tests/worker.js', {type: 'module'});
@@ -37,7 +39,7 @@ try {
     }), shared);
     assert.equal(result.realm, 'worker');
   }
-  console.log('PASS Window, DedicatedWorker and SharedWorker: hosted identity kinds, all challenge/proof kinds, DC setup/recovery, concurrent signers, devices and rejection.');
+  console.log('PASS Window, DedicatedWorker and SharedWorker: hosted identity kinds, all challenge/proof kinds, DC setup/recovery, HPKE key files and native interoperability, concurrent signers, devices and rejection.');
 } finally {
   await browser?.close();
   server.closeAllConnections();

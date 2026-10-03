@@ -11,7 +11,14 @@ struct BrowserBackend: CryptoBackend, @unchecked Sendable {
   func randomBytes(count: Int) -> [UInt8] { bytes(crypto.random!(count)) }
   func makePrivateKey(_ algorithm: PublicKey.Algorithm, for purpose: PublicKey.Purpose,
     restoring rawRepresentation: [UInt8]?) async throws -> PrivateKey {
-    guard algorithm == .ed25519, rawRepresentation == nil else { throw DiemError.unsupportedAlgorithm }
+    guard algorithm == .ed25519 else { throw DiemError.unsupportedAlgorithm }
+    if let rawRepresentation {
+      let raw = bytes(try await JSPromise(crypto.restorePublicKey!(rawRepresentation).object!)!.value)
+      return try PrivateKey(publicKey: PublicKey(purpose: purpose, algorithm: .ed25519,
+        rawRepresentation: raw), protection: .software, rawRepresentation: rawRepresentation) { message in
+        bytes(try await JSPromise(crypto.signRestored!(rawRepresentation, message).object!)!.value)
+      }
+    }
     let role = purpose == .identity ? "identity" : "device"
     let raw = bytes(crypto.publicKey!(role))
     return try PrivateKey(publicKey: PublicKey(purpose: purpose, algorithm: .ed25519,
@@ -27,10 +34,17 @@ struct BrowserBackend: CryptoBackend, @unchecked Sendable {
   }
   func makeEncryptionKey(_ algorithm: EncryptionPublicKey.Algorithm,
     restoring rawRepresentation: [UInt8]?) async throws -> EncryptionPrivateKey {
-    throw DiemError.unsupportedAlgorithm
+    guard algorithm == .p256, rawRepresentation == nil else { throw DiemError.unsupportedAlgorithm }
+    return try EncryptionPrivateKey(publicKey: EncryptionPublicKey(algorithm: .p256,
+      rawRepresentation: bytes(crypto.encryptionPublicKey!())), protection: .software,
+      rawRepresentation: nil) { box, context in
+        bytes(try await JSPromise(crypto.open!(box.encapsulatedKey, box.ciphertext, context).object!)!.value)
+      }
   }
   func seal(_ plaintext: [UInt8], to key: EncryptionPublicKey, context: [UInt8]) async throws -> SealedBox {
-    throw DiemError.unsupportedAlgorithm
+    guard key.algorithm == .p256 else { throw DiemError.unsupportedAlgorithm }
+    let box = try await JSPromise(crypto.seal!(key.rawRepresentation, plaintext, context).object!)!.value.object!
+    return SealedBox(encapsulatedKey: bytes(box.encapsulatedKey), ciphertext: bytes(box.ciphertext))
   }
 }
 
@@ -139,7 +153,7 @@ JavaScriptEventLoop.installGlobalExecutor()
       }
       let backend = BrowserBackend(now: UInt64(input.now), crypto: crypto)
       let deviceKey = try await DevicePrivateKey(backend.makePrivateKey(.ed25519, for: .device))
-      let identityKey = input.operation != "prove"
+      let identityKey = input.operation != "prove" && !bytes(crypto.publicKey!("identity")).isEmpty
         ? try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity)) : nil
       let dc = try Digest(bytes: input.dc)
       let domain = input.domain

@@ -11,6 +11,9 @@ enum BlahTag: UInt64 {
   case dcAdmin = 9
   case clientNamespace = 10
   case profile = 13
+  case keyFile = 14
+  case keyFileContents = 15
+  case privateKey = 16
 }
 
 /// Profile kind codes in Blah profile data.

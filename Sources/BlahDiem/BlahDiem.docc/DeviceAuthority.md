@@ -18,14 +18,36 @@ stored the same way, sealed to a key the device holds.
 ## Keys
 
 Each key serves one purpose. The identity key only certifies devices; a device key signs
-profile content and every Blah proof; an encryption key only receives sealed identity keys.
+profile content and every Blah proof; an encryption key receives HPKE-sealed secrets.
 A DC's ``DCProfile/transportPublicKey`` is a separate RSA key for MTProto key exchange,
 never a Diem key, and is not post-quantum.
 
-New identities use ML-DSA-65 keys, and identity keys are sealed to X-Wing encryption keys,
-unless the caller chooses otherwise. Web clients target evergreen browsers: WebCrypto supplies SHA-2, HKDF,
-AES-256-GCM and X25519, and the client supplies ML-DSA-65 and ML-KEM-768 wherever
-WebCrypto lacks them.
+New identities use ML-DSA-65 keys, and device-addressed identity transfer defaults to
+X-Wing unless the caller chooses otherwise. The browser runtime creates Ed25519
+software keys and verifies Ed25519 and P-256 profiles.
+
+## Password-protected key files
+
+``KeyFile`` is the common canonical-CBOR storage and export format for browser custody,
+DC setup and native file recovery. ``KeyFileContents`` holds the signed profile, one
+identity key, one listed device key, or both, and an encrypted application metadata map.
+The key roles remain distinct: a device-only file grants no recovery authority. Native
+hardware device keys stay on their device; native recovery exports the software identity
+key and enrolls a new hardware device when restored.
+
+Version one uses exact UTF-8 password bytes, a random 16-byte salt and
+PBKDF2-HMAC-SHA256 with 600,000 iterations to produce the input to RFC 9180's P-256
+`DeriveKeyPair`. The resulting recipient opens Diem's P-256/HKDF-SHA256/AES-256-GCM
+base-mode HPKE box. The entire header, including extensions, is both HPKE info and
+associated data. Passwords must be nonempty; there are no other length or complexity
+requirements. Neither passwords nor recipient private keys are stored in the file.
+
+The file authenticates its identity, key purposes and signed profile, and checks that
+private keys reproduce the declared public keys. Restoring an expired signed profile is
+allowed for recovery; current published authority is still required for authentication.
+File decoding and KDF work are bounded. JSON files are not accepted. Field numbers,
+size limits and the native API belong to ``KeyFile`` and ``KeyFileContents``; the web
+adapter and custody session API are described in the web package's README.
 
 ## Profiles
 

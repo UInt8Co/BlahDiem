@@ -2,6 +2,7 @@ import challenge from './challenge.js';
 import {encode, decode} from './cbor.js';
 import {createDiem} from '../dist/diem.js';
 import {exerciseProfiles} from './profiles.js';
+import {exerciseKeyFiles} from './key-files.js';
 
 function check(condition, message) { if(!condition) throw new Error(message); }
 async function rejects(action) {
@@ -31,6 +32,7 @@ async function backend() {
 
 export async function run() {
   const diem = await createDiem(new URL('../dist/diem.wasm', import.meta.url));
+  const keyFile = await exerciseKeyFiles(diem);
   const alice = await backend(), bob = await backend();
   const base = {operation: 'create', kind: 'user', domain: 'alice.example.org', profile: [], now: 1_800_000_000,
     dc: Array(32).fill(42), dcDomain: 'dc.example.org', generation: '9007199254740993'};
@@ -106,5 +108,5 @@ export async function run() {
   await rejects(() => perform('inspect', {}, corrupt));
   await exerciseProfiles({diem, backend, check, rejects, base, alice, first, second});
   check(!('blahCall' in globalThis) && !('blahCrypto' in globalThis), 'Global bridge callbacks leaked');
-  return {realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};
+  return {keyFile, realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};
 }

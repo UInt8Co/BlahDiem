@@ -49,6 +49,9 @@ let proof = try await identity.prove(loginChallenge)
 ### Client storage
 
 - ``ClientNamespace``
+- ``KeyFile``
+- ``KeyFileContents``
+- ``KeyFilePrivateKey``
 
 ### Errors
 
