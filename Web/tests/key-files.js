@@ -7,11 +7,35 @@ async function rejects(action) {
 }
 
 export async function exerciseKeyFiles(diem) {
+  // Cocoa WebKit requires the public point in a P-256 PKCS#8 private key.
+  // Chromium and Linux WebKit accept @hpke/core's 67-byte scalar-only encoding.
+  // Enforce Safari's restriction in every test realm, independent of host OS.
+  const importKey = SubtleCrypto.prototype.importKey;
+  SubtleCrypto.prototype.importKey = function(format, key, algorithm, ...args) {
+    if(algorithm.name === 'ECDH' && algorithm.namedCurve === 'P-256' &&
+      format === 'pkcs8' && key.byteLength === 67) {
+      return Promise.reject(new DOMException('P-256 PKCS#8 requires a public point', 'DataError'));
+    }
+    return importKey.call(this, format, key, algorithm, ...args);
+  };
+  try {
+    return await exerciseRecovery(diem);
+  } finally { SubtleCrypto.prototype.importKey = importKey; }
+}
+
+async function exerciseRecovery(diem) {
+  const created = await diem.keyFiles.create('Safari recovery 🔑');
+  created.destroy();
   const {file} = await (await fetch(new URL('./key-file-native.json', import.meta.url))).json();
   const opened = await diem.keyFiles.unlock(file, 'x');
   check(opened.contents.domain === 'keys.example', 'Native HPKE file opens in browser');
   check(opened.contents.identity && opened.contents.device, 'Both key roles restored');
   check(decode(file)[0] === 14 && decode(file)[5] === 600000, 'Canonical CBOR key-file header');
+  const legacy = await (await fetch(new URL('./key-file-browser.json', import.meta.url))).json();
+  const legacyOpened = await diem.keyFiles.unlock(legacy.file, 'x');
+  check(legacyOpened.contents.profile === opened.contents.profile, 'Existing browser files remain readable');
+  check(legacyOpened.contents.identity.privateKey === opened.contents.identity.privateKey, 'Existing recovery authority preserved');
+  legacyOpened.session.destroy();
   const browserFile = await opened.session.seal(opened.contents);
   const roundTrip = await diem.keyFiles.unlock(browserFile, 'x');
   check(roundTrip.contents.profile === opened.contents.profile, 'Profile preserved');

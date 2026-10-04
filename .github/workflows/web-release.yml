@@ -45,7 +45,7 @@ jobs:
       - name: Compile BridgeJS and minimize release
         run: pnpm --dir Web build
       - name: Install browser
-        run: pnpm --dir Web exec playwright install --with-deps chromium
+        run: pnpm --dir Web exec playwright install --with-deps chromium webkit
       - name: Verify minimized package in windows and workers
         run: pnpm --dir Web test
       - name: Package release

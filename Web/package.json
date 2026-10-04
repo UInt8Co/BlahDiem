@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node test.mjs"
+    "test": "node --test tests/recovery-key.test.mjs && node test.mjs"
   },
   "devDependencies": {
     "@bjorn3/browser_wasi_shim": "0.3.0",
@@ -13,6 +13,7 @@
   },
   "packageManager": "pnpm@11.16.0",
   "dependencies": {
-    "@hpke/core": "1.9.0"
+    "@hpke/core": "1.9.0",
+    "@noble/curves": "2.4.0"
   }
 }

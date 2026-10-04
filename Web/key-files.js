@@ -1,4 +1,5 @@
 import {Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256} from '@hpke/core';
+import {deriveP256KeyPair} from './recovery-key.js';
 
 const suite = new CipherSuite({kem: new DhkemP256HkdfSha256(), kdf: new HkdfSha256(), aead: new Aes256Gcm()});
 const pkcs8Prefix = new Uint8Array([48, 46, 2, 1, 0, 48, 5, 6, 3, 43, 101, 112, 4, 34, 4, 32]);
@@ -66,7 +67,7 @@ export function keyFiles(exports) {
     try {
       const key = await crypto.subtle.importKey('raw', passwordBytes, 'PBKDF2', false, ['deriveBits']);
       material = bytes(await crypto.subtle.deriveBits({name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600_000}, key, 256));
-      pair = await suite.kem.deriveKeyPair(material);
+      pair = await deriveP256KeyPair(material);
     } finally { passwordBytes.fill(0); material?.fill(0); }
     const publicKey = bytes(await suite.kem.serializePublicKey(pair.publicKey));
     const requireKey = () => { if(!pair) throw new Error('Unlock your identity to continue.'); return pair; };

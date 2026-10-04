@@ -73,8 +73,10 @@ unverified display identity and salt only; it never grants authority.
 Use `generateSigningKey()` for browser Ed25519 keys. Contents include the signed profile
 and identity and/or device keys; `diem.d.ts` owns the browser shape. Recovery files can
 contain only an identity key, device files only a device key, and browser backups both.
-The native `KeyFile` contract defines the CBOR and password/HPKE rules. The bundled
-`@hpke/core` implementation uses WebCrypto and requires no external script requests.
+The native `KeyFile` contract defines the CBOR and password/HPKE rules. Recovery files
+are portable between native clients, Chromium and Safari, including existing files.
+The bundled `@hpke/core` implementation uses WebCrypto; `@noble/curves` supplies the
+P-256 public point for Safari-compatible private-key imports. No external scripts are requested.
 Downloads use `.cbor` and `application/cbor`. JSON files are rejected.
 
 ## Vendoring a release
@@ -96,13 +98,16 @@ Node 24 and pnpm. From `Web/`:
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
-pnpm exec playwright install --with-deps chromium
+pnpm exec playwright install --with-deps chromium webkit
 pnpm test
 ```
 
-`BLAH_SWIFT`, `WASM_OPT` and `BLAH_BROWSER_EXECUTABLE` select installed tools.
+`BLAH_SWIFT`, `WASM_OPT` and `BLAH_BROWSER_EXECUTABLE` select installed tools (the browser
+override applies to Chromium).
 Build output is in `Web/dist/`. The build pins dependencies, generates BridgeJS
 bindings, minimizes the Embedded Swift binary and enforces artifact size limits.
-Tests run real WebCrypto operations in Window, DedicatedWorker and SharedWorker.
+Tests check the RFC 9180 derivation vector and run real WebCrypto operations in Window,
+DedicatedWorker and SharedWorker under Chromium and WebKit. They enforce Cocoa WebKit's
+private-key import restriction even on Linux, and retain native and pre-fix browser files.
 The [release workflow](../.github/workflows/web-release.yml) owns CI tool installation,
 testing and packaging.

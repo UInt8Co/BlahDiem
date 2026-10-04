@@ -166,7 +166,7 @@ public struct KeyFile: Sendable {
   }
 
   // RFC 9180 §7.1.3. Kept in the format owner so native password adapters only
-  // provide PBKDF2. Browser crypto uses the HPKE implementation's DeriveKeyPair.
+  // provide PBKDF2. Web/recovery-key.js implements the same derivation for WebCrypto.
   static func deriveP256PrivateKey(_ material: [UInt8]) throws -> [UInt8] {
     let suite = Array("HPKE-v1KEM".utf8) + [0, 16]
     let prk = hmac([], suite + Array("dkp_prk".utf8) + material)
