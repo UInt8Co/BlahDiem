@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.11.1'
+      - name: Test release uploads
+        run: node --test Scripts/upload-web-release.test.mjs
       - uses: pnpm/action-setup@v4
         with:
           version: '11.16.0'
@@ -70,27 +72,40 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.1'
       - uses: actions/download-artifact@v4
         with:
           name: blahdiem-web
           path: artifact
-      - name: Publish tested JS, WASM, declarations and checksums
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Determine release tag
+        id: release
         shell: bash
         run: |
           # Commit time keeps the tag stable when a run is retried on another day.
           commit_time=$(git show -s --format=%ct "$GITHUB_SHA")
           release_date=$(date -u -d "@$commit_time" +%Y%m%d)
-          release_tag="$release_date-${GITHUB_SHA:0:4}"
+          echo "tag=$release_date-${GITHUB_SHA:0:4}" >> "$GITHUB_OUTPUT"
+      - name: Publish tested JS, WASM, declarations and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
           cat > /tmp/release-notes.md <<'NOTES'
           Prebuilt BlahDiem web library, generated with BridgeJS and minimized with Binaryen.
           Tested in Window, DedicatedWorker and SharedWorker. Download the archive or all
           matching JS/WASM/type files together; verify SHA256SUMS. See README.md for use,
           compression, custody boundaries and build details.
           NOTES
-          if ! gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release create "$release_tag" --target "$GITHUB_SHA" --title "$release_tag" --notes-file /tmp/release-notes.md
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes-file /tmp/release-notes.md
           fi
-          gh release upload "$release_tag" artifact/dist/* artifact/blahdiem-web.tar.gz --clobber
+          gh release upload "$RELEASE_TAG" artifact/dist/* artifact/blahdiem-web.tar.gz --clobber
+      - name: Upload release assets to S3
+        env:
+          WEB_RELEASE_S3_TARGETS: ${{ secrets.WEB_RELEASE_S3_TARGETS }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: node Scripts/upload-web-release.mjs artifact "$RELEASE_TAG"

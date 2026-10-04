@@ -90,6 +90,50 @@ Serve WASM as `application/wasm`. Supply an explicit WASM URL when relocating th
 assets. The `.br` and `.gz` files require the corresponding `Content-Encoding`.
 Consumers need no Swift toolchain or external runtime downloads.
 
+### Publish to S3
+
+To mirror web releases to one or more buckets, set the repository's GitHub Actions
+secret `WEB_RELEASE_S3_TARGETS` to a JSON array with one entry per destination:
+
+```json
+[
+  {
+    "bucket": "blahdiem-releases",
+    "prefix": "libraries/blahdiem",
+    "region": "us-east-1",
+    "accessKeyId": "<access key>",
+    "secretAccessKey": "<secret key>"
+  },
+  {
+    "bucket": "web-library-mirror",
+    "prefix": "blahdiem",
+    "endpointUrl": "https://s3.example.com",
+    "region": "us-east-1",
+    "accessKeyId": "<mirror access key>",
+    "secretAccessKey": "<mirror secret key>"
+  }
+]
+```
+
+Each entry requires `bucket`, `accessKeyId` and `secretAccessKey`. `prefix` defaults
+to the bucket root (leading/trailing slashes are ignored), and `region` defaults to
+`us-east-1`. Set `endpointUrl` for S3-compatible storage and `sessionToken` when using
+temporary credentials. Give each credential permission to upload objects below its
+prefix; bucket access and CORS policies remain operator-managed.
+
+The release job uploads the uncompressed files in `Web/dist/` to
+`s3://<bucket>/<prefix>/<YYYYMMDD-sha4>/`, using the same tag as the GitHub release.
+JS/WASM files carry their media types for direct browser use; configure delivery-time
+compression on the CDN. The archive and `.gz`/`.br` variants are only published on GitHub.
+The original manifest and checksums still describe the complete GitHub release.
+An unset secret or `[]` skips S3 uploads. Invalid configuration or any failed upload
+fails the job; rerunning it replaces the same tag's objects without deleting other
+releases. GitHub release publishing still runs when S3 is unconfigured.
+
+The [uploader](../Scripts/upload-web-release.mjs) uses the AWS CLI available on the
+release runner. Run its checks locally with
+`node --test Scripts/upload-web-release.test.mjs`; no bucket credentials are needed.
+
 ## Build and test
 
 Install Swift 6.4, the `swift-6.4.0-RELEASE_wasm-embedded` SDK, Binaryen 133,
