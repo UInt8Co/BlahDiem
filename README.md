@@ -11,8 +11,8 @@ Decoders validate required fields and accept unknown integer keys; arrays contai
 lists only. The tuple encoding is not accepted. Every profile domain is a username candidate.
 
 See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md).
-Run `swift test` to check the contracts. The package is licensed under MIT; see
-[LICENSE](LICENSE).
+Requires Swift 6.4 or later. Run `swift test` to check the contracts. The package is
+licensed under MIT; see [LICENSE](LICENSE).
 
 ## API documentation
 

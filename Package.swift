@@ -1,4 +1,4 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.4
 import PackageDescription
 
 let package = Package(
@@ -8,8 +8,8 @@ let package = Package(
     .library(name: "BlahDiem", targets: ["BlahDiem"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/UInt8Co/diem.git", revision: "ea6383c39389fc700f15137c6e2a137b524724dc"),
-    .package(url: "https://github.com/apple/swift-docc-plugin", exact: "1.4.6"),
+    .package(url: "https://github.com/UInt8Co/diem.git", revision: "5bcb525e443ae059358eebcbfb26292cefdf9fc0"),
+    .package(url: "https://github.com/apple/swift-docc-plugin", exact: "1.5.0"),
   ],
   targets: [
     .target(name: "BlahDiem", dependencies: [.product(name: "Diem", package: "diem")]),

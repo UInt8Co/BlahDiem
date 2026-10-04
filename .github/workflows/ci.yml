@@ -10,42 +10,19 @@ jobs:
   contracts:
     name: Profile, proof and wire contracts
     runs-on: ubuntu-24.04
-    container: swift:${{ matrix.swift }}-noble
-    strategy:
-      matrix:
-        swift: ["6.3.3", "6.4.0"]
-    defaults:
-      run:
-        working-directory: BlahDiem-e2694399dc
+    container: swift:6.4.0-noble
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: BlahDiem-e2694399dc
-      - uses: actions/checkout@v4
-        with:
-          repository: UInt8Co/diem
-          ref: 3f3d2fa930634816adcb5367671b82741bc81514
-          path: diem-e641a7df16
       - name: Test Swift contracts
         run: swift test -j 4
 
   apple:
     name: Apple cryptography
     runs-on: macos-26
-    # GitHub job containers require Linux; Xcode 26.6 provides Swift 6.3.3 here.
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-    defaults:
-      run:
-        working-directory: BlahDiem-e2694399dc
     steps:
       - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v3
         with:
-          path: BlahDiem-e2694399dc
-      - uses: actions/checkout@v4
-        with:
-          repository: UInt8Co/diem
-          ref: 3f3d2fa930634816adcb5367671b82741bc81514
-          path: diem-e641a7df16
+          swift-version: "6.4.0"
       - name: Test Swift contracts
-        run: swift test
+        run: swiftly run swift test
