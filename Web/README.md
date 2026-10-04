@@ -142,9 +142,17 @@ Node 24 and pnpm. From `Web/`:
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
-pnpm exec playwright install --with-deps chromium webkit
-pnpm test
+pnpm exec playwright install --with-deps chromium
+pnpm test chromium
 ```
+
+For Safari coverage, install Playwright WebKit on macOS with
+`pnpm exec playwright install webkit`, then run `pnpm test webkit` against the same
+`Web/dist/` package. `pnpm test` without browser arguments runs both engines.
+CI builds once on Linux, checks Chromium there and checks the same artifacts with
+WebKit on macOS. Both checks must pass before publication. Linux WebKit uses a
+different cryptographic backend with intermittent Ed25519 key-generation failures;
+macOS exercises Safari's native backend and private-key import restrictions.
 
 `BLAH_SWIFT`, `WASM_OPT` and `BLAH_BROWSER_EXECUTABLE` select installed tools (the browser
 override applies to Chromium).

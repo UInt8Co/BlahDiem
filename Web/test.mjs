@@ -3,6 +3,13 @@ import {readFile, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium, webkit} from '@playwright/test';
 import assert from 'node:assert/strict';
+const supported = [chromium, webkit];
+const requested = process.argv.slice(2);
+const engines = requested.length ? requested.map(name => {
+  const engine = supported.find(engine => engine.name() === name);
+  if(!engine) throw new Error(`Unknown browser "${name}". Use chromium or webkit.`);
+  return engine;
+}) : supported;
 const web = fileURLToPath(new URL('.', import.meta.url));
 const server = createServer(async(req, res) => {
   try {
@@ -17,7 +24,7 @@ const server = createServer(async(req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 let browser;
 try {
-  for(const engine of [chromium, webkit]) {
+  for(const engine of engines) {
     browser = await engine.launch({headless: true,
       ...(engine === chromium ? {executablePath: process.env.BLAH_BROWSER_EXECUTABLE, args: ['--no-sandbox']} : {})});
     const page = await browser.newPage();

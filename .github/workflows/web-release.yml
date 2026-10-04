@@ -47,9 +47,9 @@ jobs:
       - name: Compile BridgeJS and minimize release
         run: pnpm --dir Web build
       - name: Install browser
-        run: pnpm --dir Web exec playwright install --with-deps chromium webkit
-      - name: Verify minimized package in windows and workers
-        run: pnpm --dir Web test
+        run: pnpm --dir Web exec playwright install --with-deps chromium
+      - name: Verify minimized package in Chromium windows and workers
+        run: pnpm --dir Web test chromium
       - name: Package release
         shell: bash
         run: |
@@ -64,9 +64,37 @@ jobs:
             Web/blahdiem-web.tar.gz
           if-no-files-found: error
 
+  webkit:
+    name: Safari WebKit
+    needs: build
+    # Exercise Safari's Cocoa crypto backend. Linux WebKit's libgcrypt backend
+    # intermittently rejects Ed25519 key generation when it drops leading zeros.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.1'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.16.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: blahdiem-web
+          path: Web
+      - name: Verify the Linux-built package
+        working-directory: Web/dist
+        run: shasum -a 256 -c SHA256SUMS
+      - name: Install browser test dependencies
+        run: pnpm --dir Web install --frozen-lockfile
+      - name: Install WebKit
+        run: pnpm --dir Web exec playwright install webkit
+      - name: Verify minimized package in WebKit windows and workers
+        run: pnpm --dir Web test webkit
+
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, webkit]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
