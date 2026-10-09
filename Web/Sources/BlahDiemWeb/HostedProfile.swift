@@ -4,48 +4,48 @@ import BlahDiem
 struct HostedProfile {
   let kind: String
   var home: Home?
-  var domains: [ProfileDomain]
-  private var dc: DCProfile?
+  var domains: [DomainName]
+  private var dc: DCProfile.Content?
   private var dcHome: Home?
 
-  init(kind: String, home: Home?, domains: [ProfileDomain]) {
+  init(kind: String, home: Home?, domains: [DomainName]) {
     self.kind = kind
     self.home = home
     self.domains = domains
   }
 
-  init(_ profile: Profile, kind: String) throws {
+  init(_ profile: AnyBlahProfile, kind: String) throws {
     self.kind = kind
-    switch try AnyBlahProfile(profile) {
-    case .user(let p) where kind == "user": home = p.home; domains = p.domains
-    case .channel(let p) where kind == "channel": home = p.home; domains = p.domains
-    case .bot(let p) where kind == "bot": home = p.home; domains = p.domains
+    home = profile.home
+    domains = profile.domains
+    switch profile {
+    case .user where kind == "user", .channel where kind == "channel", .bot where kind == "bot",
+      .stickerSet where kind == "stickerSet":
+      break
     case .dc(let p) where kind == "user" || kind == "dc":
-      home = try profile.blahHome
       dcHome = home
-      dc = p
-      domains = try p.domains.map { try ProfileDomain($0) }
-    case .stickerSet(let p) where kind == "stickerSet":
-      home = p.home; domains = [try ProfileDomain(p.shortName)]
+      dc = p.content
     default: throw BlahError.invalidProfile
     }
   }
 
-  func encoded() throws -> [UInt8] {
-    if var dc {
-      guard home?.dc == dcHome?.dc, home?.epoch == dcHome?.epoch,
-        home?.account == DCProfile.accountID else { throw BlahError.wrongHome }
-      dc.domains = domains.map { $0.name }
-      return try dc.encoded()
-    }
-    switch kind {
-    case "user": return try UserProfile(home: home, domains: domains).encoded()
-    case "channel": return try ChannelProfile(home: home, domains: domains).encoded()
-    case "bot": return try BotProfile(home: home, domains: domains).encoded()
-    case "stickerSet":
-      guard domains.count == 1 else { throw BlahError.invalidName }
-      return try StickerSetProfile(home: home, shortName: domains[0].name).encoded()
-    default: throw BlahError.invalidProfile
+  var content: AnyBlahProfile.Content {
+    get throws {
+      if var dc {
+        guard home?.dc == dcHome?.dc, home?.epoch == dcHome?.epoch,
+          home?.account == DCProfile.accountID else { throw BlahError.wrongHome }
+        dc.domains = domains
+        return .dc(dc)
+      }
+      switch kind {
+      case "user": return .user(HostedContent(home: home, domains: domains))
+      case "channel": return .channel(HostedContent(home: home, domains: domains))
+      case "bot": return .bot(HostedContent(home: home, domains: domains))
+      case "stickerSet":
+        guard domains.count == 1 else { throw BlahError.invalidName }
+        return .stickerSet(.init(home: home, shortName: domains[0]))
+      default: throw BlahError.invalidProfile
+      }
     }
   }
 }

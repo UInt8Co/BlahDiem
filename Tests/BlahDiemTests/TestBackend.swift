@@ -29,7 +29,7 @@ final class TestBackend: CryptoBackend {
 
 enum Fixture {
   static let dcID = Digest(hashing: [7])
-  static let dc = try! DCAddress(domain: "one.example", id: dcID)
+  static let dc = DCAddress(domain: try! DomainName("one.example"), id: dcID)
   static let nonce = [UInt8](repeating: 9, count: 32)
   static func home(account: Int64? = nil) -> Home {
     Home(dc: dcID, epoch: 1, expiresAt: TestBackend.start + 3600, account: account)

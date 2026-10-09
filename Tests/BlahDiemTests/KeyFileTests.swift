@@ -8,8 +8,9 @@ import Testing
   func contents() async throws -> KeyFileContents {
     let root = try await IdentityPrivateKey.generate(.ed25519, using: backend)
     let device = try await DevicePrivateKey.generate(.ed25519, using: backend)
-    let data = try UserProfile(home: Fixture.home(), domains: [ProfileDomain("keys.example")]).encoded()
-    let identity = try await Identity(data: data, identityKey: root, deviceKey: device, using: backend)
+    let content = HostedContent(home: Fixture.home(), domains: [try DomainName("keys.example")])
+    let identity = try await BasicIdentity<AnyBlahProfile>(
+      .user(content), identityKey: root, deviceKey: device, using: backend)
     return try KeyFileContents(profile: identity.profile, keys: [
       KeyFilePrivateKey(publicKey: root.publicKey.key, secret: #require(root.rawRepresentation)),
       KeyFilePrivateKey(publicKey: device.publicKey.key, secret: #require(device.rawRepresentation)),
@@ -105,7 +106,7 @@ import Testing
       let file = try KeyFile(encoding: vector.file)
       let contents = try await file.open(with: recipient, using: backend)
       #expect(contents.keys.count == 2)
-      #expect(try AnyBlahProfile(contents.profile).domains == ["keys.example"])
+      #expect(contents.profile.domains.map(\.name) == ["keys.example"])
     }
   }
 }

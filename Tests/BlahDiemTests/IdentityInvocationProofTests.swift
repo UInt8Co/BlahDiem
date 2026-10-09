@@ -5,9 +5,9 @@ import Testing
 @Suite struct IdentityInvocationProofTests {
   let backend = TestBackend()
 
-  func identity(home: Home? = Fixture.home()) async throws -> Identity {
-    try await Identity(
-      UserProfile(home: home, domains: [try ProfileDomain("alice.one.example")]), using: backend)
+  func identity(home: Home? = Fixture.home()) async throws -> BasicIdentity<UserProfile> {
+    try await BasicIdentity(
+      HostedContent(home: home, domains: [try DomainName("alice.one.example")]), using: backend)
   }
 
   @Test func blahIdentitiesUsePostQuantumKeysForSeparatePurposes() async throws {
@@ -16,13 +16,13 @@ import Testing
     #expect(identityKey.purpose == .identity && identityKey.algorithm == .mlDSA65)
     #expect(deviceKey.purpose == .device && deviceKey.algorithm == .mlDSA65)
     let consent = try await alice.prove(OAuthConsentChallenge.sample(expiresAt: backend.now + 60))
-    #expect(consent.proof.deviceID == alice.deviceKey.publicKey.id)
+    #expect(consent.deviceID == alice.deviceKey.publicKey.id)
   }
 
   @Test func invocationProofBindsTheChallengeAndExactQuery() async throws {
     let alice = try await identity()
     let challenge = try InvocationChallenge(
-      domain: "alice.one.example", nonce: Fixture.nonce, expiresAt: backend.now + 120,
+      domain: DomainName("alice.one.example"), nonce: Fixture.nonce, expiresAt: backend.now + 120,
       dc: Fixture.dcID, transportKeyID: 42, sessionID: 73)
     let query: [UInt8] = [1, 2, 3, 4, 5]
     let proof = try await alice.prove(InvocationStatement(challenge: challenge, payload: query))
@@ -33,7 +33,7 @@ import Testing
     #expect(received.statement.matches(query) && !received.statement.matches([1, 2, 3, 4, 6]))
 
     let elsewhere = try InvocationChallenge(
-      domain: "bob.one.example", nonce: Fixture.nonce, expiresAt: backend.now + 120,
+      domain: DomainName("bob.one.example"), nonce: Fixture.nonce, expiresAt: backend.now + 120,
       dc: Fixture.dcID, transportKeyID: 42, sessionID: 73)
     await #expect(throws: BlahError.invalidChallenge) {
       try await alice.prove(InvocationStatement(challenge: elsewhere, payload: query))
@@ -58,7 +58,7 @@ import Testing
       try BlahProof<OAuthConsentChallenge>(encoding: proof.encoding)
     }
 
-    let otherDC = try DCAddress(domain: "two.example", id: Digest(hashing: [8]))
+    let otherDC = DCAddress(domain: try DomainName("two.example"), id: Digest(hashing: [8]))
     await #expect(throws: BlahError.wrongHome) { try await alice.prove(challenge(dc: otherDC)) }
     await #expect(throws: BlahError.invalidChallenge) {
       try await alice.prove(challenge(digest: Digest(hashing: [])))
@@ -108,7 +108,7 @@ import Testing
   @Test func aRemovedDevicesProofFailsAgainstTheNewProfile() async throws {
     var alice = try await identity()
     let phoneKey = try await DevicePrivateKey.generate(using: backend)
-    let phone = try await Identity(
+    let phone = try await BasicIdentity(
       profile: try await alice.add(phoneKey.publicKey), deviceKey: phoneKey, using: backend)
     let proof = try await phone.prove(OAuthConsentChallenge.sample(expiresAt: backend.now + 60))
     try await proof.verify(against: phone.profile, using: backend)

@@ -51,28 +51,34 @@ adapter and custody session API are described in the web package's README.
 
 ## Profiles
 
-A `Profile` carries a ``BlahProfile`` as its data. A hosted identity names its
-``Home``: the DC's identity ID, the epoch of the hosting and, once allocated, the account
-number. A later epoch is a new account. Its ``ProfileDomain`` list names the domains that
-serve the profile; every listed domain is a public username candidate. Verification and
-activation belong to the home DC.
+Each Blah profile type conforms to ``BlahProfile``, a Diem `DomainNamedProfile`. Its
+fields are signed directly in the Diem profile content: the domains that serve it in
+Diem's standard domains field, and from Diem's first application key a profile kind
+followed by that kind's fields. Each type decodes only its own kind;
+``AnyBlahProfile`` decodes any. A type's `Content` is what the publisher edits, and
+`BasicIdentity` signs it as the next revision.
+
+A hosted identity names its ``Home``: the DC's identity ID, the epoch of the hosting
+and, once allocated, the account number. A later epoch is a new account. Every domain
+of a user, bot or channel profile is a public username candidate; a sticker set has
+exactly one, its short name. Verification and activation belong to the home DC.
 
 A ``DCProfile`` advertises client and BIDCOM endpoints, the RSA transport key and
-database namespace generation. It also represents a special user account, permanently
-hosted by its own identity as account 777000 in epoch 1. The enclosing signed profile
-supplies that identity and the hosting's expiry; no independent home can move it elsewhere.
-`Profile.blahHome` is the common hosting view used by proofs and client namespaces.
-Endpoints use integer-keyed maps: transport 0 is TCP
-with a null path; transport 1
-is WebSocket with an absolute HTTP path, optionally including a query. TLS is explicit
-for either transport. The endpoint lists are bounded and contain no duplicates;
-BIDCOM accepts TCP only and can be empty. Clients verify the enclosing Diem profile
-and its discovery domain before using these values. The field keys and validation belong to ``DCProfile``.
+database namespace generation, and at least one discovery domain. It also represents a
+special user account, permanently hosted by its own identity as account 777000 in epoch
+1. The signed profile supplies that identity and the hosting's expiry; no independent
+home can move it elsewhere. ``BlahProfile/home`` is the common hosting view used by
+proofs and client namespaces. Endpoints use integer-keyed maps: transport 0 is TCP
+with a null path; transport 1 is WebSocket with an absolute HTTP path, optionally
+including a query. TLS is explicit for either transport. The endpoint lists are bounded
+and contain no duplicates; BIDCOM accepts TCP only and can be empty. Clients verify the
+profile and that it serves its discovery domain before using these values. The field
+keys and validation belong to each profile type.
 
 ## Proofs
 
 A DC issues a ``BlahStatement`` — a login, invocation or approval challenge — and a device
-signs it with `Identity.prove(_:)`. Before signing, the statement checks
+signs it with `Identity.prove(_:)`, which returns a ``BlahProof``, a Diem `Proof`. Before signing, the statement checks
 that it is live, from the identity's home and for this identity and device. An approval is
 signed only when it equals what the user reviewed. The DC verifies the ``BlahProof``
 against the identity's current profile.

@@ -36,7 +36,9 @@ An existing DC profile is also accepted as a `user` (or `dc`) identity for inspe
 device management, renewal and proofs. It remains a DC profile, permanently hosted by
 itself as account 777000. DC creation uses `dcSetup`; changing its account or home is refused.
 
-- `dcSetup` creates a DC identity or renews an existing one using encoded DC data.
+- `dcSetup` creates a DC identity or renews an existing one. `data` holds the DC
+  profile fields as a CBOR map, as signed in the Diem profile content: the discovery
+  domains at key 9 and the DC fields from key 16 (`DCProfile` owns the keys).
   It returns the signed public profile and the operator device's certificate validity
   (`notBefore` and `expiresAt`, Unix seconds). No server device is created or certified.
   Pass `profile: null` to create, or the existing profile to renew. Only the public

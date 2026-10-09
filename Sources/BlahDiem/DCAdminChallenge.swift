@@ -61,7 +61,7 @@ public struct DCAdminChallenge: BlahStatement {
       throw e
     }
     try self.init(
-      dc: DCAddress(domain: a[Self.cborKeyDCDomain]!.text(e), id: a[Self.cborKeyDCID]!.digest(e)),
+      dc: CBOR.dcAddress(a, domain: Self.cborKeyDCDomain, id: Self.cborKeyDCID, error: e),
       nonce: a[Self.cborKeyNonce]!.bytes(e),
       expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), operation: operation,
       revision: a[Self.cborKeyRevision]!.unsigned(e),
@@ -73,7 +73,7 @@ public struct DCAdminChallenge: BlahStatement {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.dcAdmin.rawValue), Self.cborKeyVersion: .unsigned(1),
-        Self.cborKeyDCDomain: .text(dc.domain), Self.cborKeyDCID: .bytes(dc.id.bytes),
+        Self.cborKeyDCDomain: .text(dc.domain.name), Self.cborKeyDCID: .bytes(dc.id.bytes),
         Self.cborKeyNonce: .bytes(nonce), Self.cborKeyExpiresAt: .unsigned(expiresAt),
         Self.cborKeyOperation: .unsigned(operation.rawValue),
         Self.cborKeyRevision: .unsigned(revision),
@@ -83,7 +83,9 @@ public struct DCAdminChallenge: BlahStatement {
   }
 
   /// Requires a live challenge from the identity's home DC.
-  public func validate(for identity: Identity) throws(BlahError) {
+  public func validate<I: Identity>(for identity: I) throws(BlahError)
+    where I.Profile: BlahProfile
+  {
     try identity.requireLive(until: expiresAt)
     try identity.requireHome(dc.id)
   }

@@ -7,7 +7,8 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const dc = bytes(base.dc), nonce = new Uint8Array(32).fill(7), expires = base.now + 60;
   const keyID = 18446744073709551614n, sessionID = 18446744073709551613n;
   const content = profile => decode(decode(decode(profile)[4])[0]);
-  const data = profile => decode(content(profile)[9]);
+  // Profile domains (9) and application fields (16 and up), as signed in the content.
+  const fields = profile => Object.fromEntries(Object.entries(content(profile)).filter(([key]) => key == 9 || key >= 16));
   const verify = async(result, signer, statement) => {
     const {0: message, 1: signature} = decode(result.proof);
     check(await signer.verify(signer.publicKey('device'), message, signature), 'Proof signature');
@@ -24,7 +25,7 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     const signer = await backend();
     const request = {...base, kind, domain};
     const created = await diem.identityOperation(request, signer);
-    check(data(created.profile)[2] === tag, `${kind} profile kind`);
+    check(content(created.profile)[16] === tag && content(created.profile)[9][0] === domain, `${kind} profile kind`);
     const perform = (operation, extra = {}, profile = created.profile) =>
       diem.identityOperation({...request, operation, profile, ...extra}, signer);
     await rejects(() => perform('inspect', {kind: kind === 'user' ? 'channel' : 'user'}));
@@ -84,11 +85,11 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     }
   }
 
-  const dcData = encode({0: 13, 1: 1, 2: 5, 3: ['dc.example.org'], 4: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
-    5: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 6: 'transport-public-key', 7: 1});
+  const dcData = encode({9: ['dc.example.org'], 16: 5, 18: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
+    19: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 20: 'transport-public-key', 21: 1});
   const input = {data: dcData, profile: null, now: base.now};
   const created = await diem.dcSetup(input, alice);
-  check(data(created.profile)[2] === 5 && created.devices.length === 1, 'DC creation without a server device');
+  check(content(created.profile)[16] === 5 && created.devices.length === 1, 'DC creation without a server device');
   const dcRequest = {...base, kind: 'user', domain: 'dc.example.org', dcDomain: 'dc.example.org',
     dc: fromHex(created.id), profile: created.profile};
   const operateDC = (operation, extra = {}) => diem.identityOperation({...dcRequest, operation, ...extra}, alice);
@@ -103,7 +104,7 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     query: dcQuery}), alice, encode({0: 5, 1: 1, 2: bytes(dcInvocation), 3: 1,
     4: new Uint8Array(await crypto.subtle.digest('SHA-512', dcQuery))}));
   const dcRenewed = await operateDC('renew', {now: base.now + 10});
-  check(data(dcRenewed.profile)[2] === 5 && dcRenewed.account === '777000', 'User renewal preserves DC kind');
+  check(content(dcRenewed.profile)[16] === 5 && dcRenewed.account === '777000', 'User renewal preserves DC kind');
   await rejects(() => operateDC('account', {account: '1000000'}));
   await rejects(() => operateDC('inspect', {dc: base.dc}));
   check(created.expiresAt === base.now + 90 * 86400, 'Default 90-day DC profile');
@@ -123,7 +124,7 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const renewed = await diem.dcSetup({...input, profile: created.profile, now: base.now + 91 * 86400,
     profileLifetime: 45 * 86400, deviceLifetime: 120 * 86400}, alice);
   check(renewed.id === created.id && renewed.expiresAt > created.expiresAt && renewed.devices.length === 1, 'Expired DC recovery');
-  check(equal(content(renewed.profile)[9], bytes(dcData)), 'DC data survives renewal');
+  check(equal(encode(fields(renewed.profile)), dcData), 'DC fields survive renewal');
   check(renewed.expiresAt === base.now + (91 + 45) * 86400, 'Chosen DC profile lifetime');
   check(renewed.devices[0].expiresAt === base.now + (91 + 120) * 86400, 'Chosen DC certificate lifetime');
   for(const lifetimes of [
@@ -132,7 +133,8 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     {deviceLifetime: Number.MAX_SAFE_INTEGER}
   ]) await rejects(() => diem.dcSetup({...input, ...lifetimes}, alice));
   await rejects(() => diem.dcSetup({...input, profile: first.profile}, alice));
-  await rejects(() => diem.dcSetup({...input, data: content(first.profile)[9]}, alice));
+  await rejects(() => diem.dcSetup({...input, data: encode(fields(first.profile))}, alice));
+  await rejects(() => diem.dcSetup({...input, data: encode({...fields(created.profile), 10: null})}, alice));
   await rejects(() => diem.dcSetup({...input, data: new Array(10)}, alice));
   await rejects(() => diem.dcSetup({...input, now: 1.5}, alice));
   const wrongSigner = await backend();

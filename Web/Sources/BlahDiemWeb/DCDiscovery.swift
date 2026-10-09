@@ -48,16 +48,15 @@ import JavaScriptKit
     guard let time = UInt64(exactly: now), time <= 9007199254740991 else {
       throw BlahError.invalidProfile
     }
-    let profile = try Profile(encoding: encoding)
-    try await profile.verify(using: BrowserBackend(now: time, crypto: crypto))
-    let dc = try DCProfile(profile)
-    guard dc.domains.contains(domain), let namespace = dc.namespaceGeneration else {
+    let dc = try DCProfile(encoding: encoding)
+    try await dc.verify(using: BrowserBackend(now: time, crypto: crypto))
+    guard dc.serves(domain), let namespace = dc.namespaceGeneration else {
       throw BlahError.invalidProfile
     }
-    return DCDiscoveryResult(id: profile.id.description,
-      generation: String(profile.generation), revision: String(profile.revision),
-      digest: profile.digest.description, namespaceGeneration: String(namespace),
-      expiresAt: String(profile.validity.expiresAt),
+    return DCDiscoveryResult(id: dc.id.description,
+      generation: String(dc.generation), revision: String(dc.revision),
+      digest: dc.digest.description, namespaceGeneration: String(namespace),
+      expiresAt: String(dc.validity.expiresAt),
       endpoints: dc.endpoints.map { DCEndpointInfo(host: $0.host, port: Double($0.port),
         tls: $0.tls, transport: $0.transport == .webSocket ? "webSocket" : "tcp", path: $0.path) },
       transportPublicKey: dc.transportPublicKey)

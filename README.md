@@ -5,10 +5,12 @@ identities: user, bot, channel, sticker-set and DC profiles, the DC challenges t
 devices sign, password-protected HPKE key files, and the client cache namespace. Blah clients and DCs share it. It is
 Foundation-free and runs on any Diem `CryptoBackend`.
 
-Blah records are canonical CBOR maps with unsigned integer field keys and fixed numeric
-tags. Record types expose their field numbers as public static `cborKey…` constants.
-Decoders validate required fields and accept unknown integer keys; arrays contain
-lists only. The tuple encoding is not accepted. Every profile domain is a username candidate.
+Blah profile types adopt Diem's profile protocols and sign their fields directly in the
+Diem profile. Other Blah records are canonical CBOR maps with unsigned integer field
+keys and fixed numeric tags. Types expose their field numbers as public static
+`cborKey…` constants. Decoders validate required fields and accept unknown integer
+keys; arrays contain lists only. The tuple encoding is not accepted. Every profile
+domain is a username candidate.
 
 See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md).
 Requires Swift 6.4 or later. Run `swift test` to check the contracts. The package is

@@ -158,16 +158,16 @@ JavaScriptEventLoop.installGlobalExecutor()
       let dc = try Digest(bytes: input.dc)
       let domain = input.domain
       let kind = input.kind
-      var identity: Identity
+      var identity: BasicIdentity<AnyBlahProfile>
       if input.operation == "create" {
-        let data = try HostedProfile(kind: kind,
+        let content = try HostedProfile(kind: kind,
           home: Home(dc: dc, epoch: 1, expiresAt: backend.now + deviceLifetime),
-          domains: [ProfileDomain(domain)]).encoded()
+          domains: [DomainName(domain)]).content
         guard let identityKey else { throw DiemError.identityKeyRequired }
-        identity = try await Identity(data: data, identityKey: identityKey, deviceKey: deviceKey,
+        identity = try await BasicIdentity(content, identityKey: identityKey, deviceKey: deviceKey,
           profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       } else {
-        identity = try await Identity(profile: Profile(encoding: input.profile),
+        identity = try await BasicIdentity(profile: AnyBlahProfile(encoding: input.profile),
           deviceKey: deviceKey, identityKey: identityKey,
           profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       }
@@ -179,16 +179,16 @@ JavaScriptEventLoop.installGlobalExecutor()
       case "renew":
         hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + deviceLifetime, account: home.account)
         try await identity.renew()
-        try await identity.update(data: hosted.encoded())
+        try await identity.update(hosted.content)
       case "domains":
         guard kind == "user", let names = input.domains, !names.isEmpty else { throw BlahError.invalidName }
-        hosted.domains = try names.map { try ProfileDomain($0) }
-        try await identity.update(data: hosted.encoded())
+        hosted.domains = try names.map { try DomainName($0) }
+        try await identity.update(hosted.content)
       case "account":
         guard let account = Int64(input.account ?? ""), account > 0,
           home.account == nil || home.account == account else { throw BlahError.wrongNamespace }
         hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: home.expiresAt, account: account)
-        try await identity.update(data: hosted.encoded())
+        try await identity.update(hosted.content)
       case "removeDevice":
         try await identity.remove(Digest(bytes: input.device ?? []))
       case "addDevice":
@@ -199,7 +199,7 @@ JavaScriptEventLoop.installGlobalExecutor()
       default: throw BlahError.invalidProfile
       }
       let namespace = try ClientNamespace(profile: identity.profile,
-        dc: DCAddress(domain: input.dcDomain, id: dc), generation: generation)
+        dc: DCAddress(domain: DomainName(input.dcDomain), id: dc), generation: generation)
       return IdentityResult(id: identity.id.description, namespace: namespace.identifier, domains: hosted.domains.map { $0.name },
         profile: identity.profile.encoding, proof: proof,
         account: hosted.home?.account.map(String.init) ?? "",
@@ -211,7 +211,7 @@ JavaScriptEventLoop.installGlobalExecutor()
     }
 }
 
-func deviceInfo(_ identity: Identity) -> [DeviceInfo] {
+func deviceInfo(_ identity: some Identity) -> [DeviceInfo] {
   identity.profile.devices.map { certificate in
     DeviceInfo(id: certificate.device.id.description, key: certificate.device.key.encoding,
       current: certificate.device == identity.deviceKey.publicKey,
@@ -239,6 +239,7 @@ func bridgeError(_ error: any Error) -> String {
     case .invalidSignature: return "invalidSignature"
     case .unsupportedAlgorithm: return "unsupportedAlgorithm"
     case .invalidValidity: return "invalidValidity"
+    case .invalidDomain: return "invalidDomain"
     case .expired: return "expired"
     case .identityMismatch: return "identityMismatch"
     case .deviceNotListed: return "deviceNotListed"

@@ -39,8 +39,8 @@ import JavaScriptKit
 @JS public func sealKeyFile(input: KeyFilePayload, salt: [UInt8], crypto: JSObject) async throws(JSException) -> [UInt8] {
   do {
     let backend = BrowserBackend(now: 0, crypto: crypto)
-    let profile = try Profile(encoding: input.profile)
-    guard try AnyBlahProfile(profile).domains.contains(input.domain),
+    let profile = try AnyBlahProfile(encoding: input.profile)
+    guard profile.serves(input.domain),
       let profileDays = UInt64(exactly: input.profileDays), profileDays > 0,
       let deviceDays = UInt64(exactly: input.deviceDays), deviceDays >= profileDays,
       input.deviceDays * 86400 <= 9007199254740991,
@@ -71,7 +71,7 @@ import JavaScriptKit
       throw DiemError.unsupportedAlgorithm
     }
     let metadata = try contents.metadata.recordValue(requiredKeys: 0..<0)
-    let domains = try AnyBlahProfile(contents.profile).domains
+    let domains = contents.profile.domains.map { $0.name }
     let domain = try metadata[0]?.textValue() ?? domains.first ?? ""
     guard domains.contains(domain) else { throw DiemError.identityMismatch }
     return try KeyFilePayload(profile: contents.profile.encoding,

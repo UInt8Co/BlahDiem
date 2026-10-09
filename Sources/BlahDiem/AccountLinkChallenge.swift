@@ -91,7 +91,7 @@ public struct AccountLinkChallenge: BlahStatement {
     let identity = try a[Self.cborKeyIdentityID]!.bytes(e)
     let request = try a[Self.cborKeyRequestID]!.bytes(e)
     try self.init(
-      dc: DCAddress(domain: a[Self.cborKeyDCDomain]!.text(e), id: a[Self.cborKeyDCID]!.digest(e)),
+      dc: CBOR.dcAddress(a, domain: Self.cborKeyDCDomain, id: Self.cborKeyDCID, error: e),
       nonce: a[Self.cborKeyNonce]!.bytes(e),
       expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), operation: operation,
       identityID: identity.isEmpty ? nil : a[Self.cborKeyIdentityID]!.digest(e),
@@ -106,7 +106,7 @@ public struct AccountLinkChallenge: BlahStatement {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.accountLink.rawValue), Self.cborKeyVersion: .unsigned(1),
-        Self.cborKeyDCDomain: .text(dc.domain), Self.cborKeyDCID: .bytes(dc.id.bytes),
+        Self.cborKeyDCDomain: .text(dc.domain.name), Self.cborKeyDCID: .bytes(dc.id.bytes),
         Self.cborKeyNonce: .bytes(nonce), Self.cborKeyExpiresAt: .unsigned(expiresAt),
         Self.cborKeyOperation: .unsigned(operation.rawValue), Self.cborKeyProvider: .unsigned(1),
         Self.cborKeyIdentityID: .bytes(identityID?.bytes ?? []),
@@ -119,7 +119,9 @@ public struct AccountLinkChallenge: BlahStatement {
   }
 
   /// Requires a live challenge from the identity's home DC, naming this identity if any.
-  public func validate(for identity: Identity) throws(BlahError) {
+  public func validate<I: Identity>(for identity: I) throws(BlahError)
+    where I.Profile: BlahProfile
+  {
     try identity.requireLive(until: expiresAt)
     guard identityID == nil || identityID == identity.id else { throw .invalidChallenge }
     try identity.requireHome(dc.id)

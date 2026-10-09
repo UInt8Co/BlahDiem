@@ -6,104 +6,121 @@ import Testing
   let backend = TestBackend()
 
   @Test func aUserProfileKeepsItsNameAcrossRenumbering() async throws {
-    var user = UserProfile(home: Fixture.home(), domains: [try ProfileDomain("id.one.example")])
-    user.username = "alice.one.example"
-    var identity = try await Identity(user, using: backend)
-    var parsed = try UserProfile(identity.profile)
-    #expect(parsed == user && parsed.username == "alice.one.example")
+    var user = HostedContent(home: Fixture.home(), domains: [try DomainName("id.one.example")])
+    user.username = try DomainName("alice.one.example")
+    var identity = try await BasicIdentity<UserProfile>(user, using: backend)
+    var parsed = try UserProfile(encoding: identity.profile.encoding)
+    #expect(parsed.content == user && parsed.username?.name == "alice.one.example")
+    #expect(parsed.domains == user.domains && parsed.serves("alice.one.example"))
 
-    parsed.home?.account = 1_000_001
-    let numbered = try UserProfile(try await identity.update(parsed))
-    #expect(numbered.home?.account == 1_000_001 && numbered.username == "alice.one.example")
+    var next = parsed.content
+    next.home?.account = 1_000_001
+    parsed = try await identity.update(next)
+    #expect(parsed.home?.account == 1_000_001 && parsed.username?.name == "alice.one.example")
 
-    parsed.username = nil
-    #expect(try UserProfile(try await identity.update(parsed)).domains.map(\.name) == [])
+    next.username = nil
+    #expect(try await identity.update(next).domains == [])
   }
 
-  @Test func allProfileDomainsAreUsernameCandidates() throws {
-    for name in ["alice", "Alice.example", "ali_ce.example", "-a.example", "a-.example", "a..example", "a.example.",
-      "álîce.example", "alice.例え", "alice.💬", "a.\u{212A}", String(repeating: "a", count: 64) + ".example"] {
-      #expect(throws: BlahError.invalidName) { try ProfileDomain(name) }
-      var user = UserProfile(home: nil)
-      user.username = name
-      #expect(throws: BlahError.invalidName) { try user.encoded() }
+  @Test func profileDomainsAreDistinctAndKindsLimitTheirCount() async throws {
+    let one = try DomainName("helper.one.example")
+    var identity = try await BasicIdentity<BotProfile>(
+      HostedContent(home: Fixture.home(account: 1_000_002), domains: [one]), using: backend)
+    #expect(try BotProfile(encoding: identity.profile.encoding) == identity.profile)
+    await #expect(throws: BlahError.invalidName) {
+      try await identity.update(HostedContent(home: nil, domains: [one, one]))
     }
-    var bot = BotProfile(home: Fixture.home(account: 1_000_002))
-    bot.username = "helper.one.example"
-    #expect(try BotProfile(data: bot.encoded()) == bot)
-    bot.username = "helperbot.one.example"
-    #expect(try BotProfile(data: bot.encoded()) == bot)
-    #expect(DomainName.normalized("Alice.Example") == "alice.example")
+    let many = try (0...ProfileFields.maximumDomains).map { try DomainName("d\($0).example") }
+    await #expect(throws: BlahError.invalidName) {
+      try await identity.update(HostedContent(home: nil, domains: many))
+    }
   }
 
-  @Test func accountNumbersComeFromEachKindsOwnSpace() throws {
-    let channel = ChannelProfile(home: Fixture.home(account: 997_852_516_352))
-    #expect(throws: BlahError.invalidProfile) { try channel.encoded() }
-    let user = UserProfile(home: Fixture.home(account: 997_852_516_352))
-    #expect(try UserProfile(data: user.encoded()) == user)
+  @Test func accountNumbersComeFromEachKindsOwnSpace() async throws {
+    let numbered = HostedContent(home: Fixture.home(account: 997_852_516_352))
+    #expect(throws: BlahError.invalidProfile) { try ChannelProfile.fields(for: numbered) }
+    let user = try await BasicIdentity<UserProfile>(numbered, using: backend)
+    #expect(user.profile.home?.account == 997_852_516_352)
     #expect(throws: BlahError.invalidProfile) {
-      try UserProfile(home: Home(dc: Fixture.dcID, epoch: 0, expiresAt: 1)).encoded()
+      try UserProfile.fields(for: HostedContent(home: Home(dc: Fixture.dcID, epoch: 0, expiresAt: 1)))
     }
   }
 
-  @Test func aStickerSetHasExactlyOneShortName() throws {
-    let set = StickerSetProfile(home: Fixture.home(account: 5), shortName: "cats.one.example")
-    #expect(try StickerSetProfile(data: set.encoded()) == set)
-    let twoNames = try UserProfile(
-      home: nil, domains: [ProfileDomain("a.example"), ProfileDomain("b.example")]
-    ).encoded()
-    #expect(throws: BlahError.invalidProfile) { try StickerSetProfile(data: twoNames) }
+  @Test func aStickerSetHasExactlyOneShortName() async throws {
+    let content = StickerSetProfile.Content(
+      home: Fixture.home(account: 5), shortName: try DomainName("cats.one.example"))
+    let set = try await BasicIdentity<StickerSetProfile>(content, using: backend)
+    #expect(try StickerSetProfile(encoding: set.profile.encoding).content == content)
+    #expect(set.profile.domains == [content.shortName])
+    // Another kind's profile, even with one name, is not a sticker set.
+    let user = try await BasicIdentity<UserProfile>(
+      HostedContent(home: nil, domains: [try DomainName("a.example")]), using: backend)
+    #expect(throws: BlahError.invalidProfile) { try StickerSetProfile(record: user.profile.record) }
+    // A sticker-set kind with two names is malformed.
+    var fields = try StickerSetProfile.fields(for: content)
+    fields.domains.append(try DomainName("b.example"))
+    var raw = try await BasicIdentity<ProfileRecord>(fields, using: backend)
+    #expect(throws: BlahError.invalidName) { try StickerSetProfile(record: raw.profile) }
+    fields.domains = []
+    let unnamed = try await raw.update(fields)
+    #expect(throws: BlahError.invalidName) { try StickerSetProfile(record: unnamed) }
   }
 
   @Test func eachKindDecodesOnlyAsItself() async throws {
-    let channel = try await Identity(ChannelProfile(home: Fixture.home()), using: backend)
-    guard case .channel(let decoded) = try AnyBlahProfile(channel.profile) else {
+    let channel = try await BasicIdentity<ChannelProfile>(
+      HostedContent(home: Fixture.home()), using: backend)
+    guard case .channel(let decoded) = try AnyBlahProfile(encoding: channel.profile.encoding) else {
       Issue.record("Expected a channel profile")
       return
     }
     #expect(decoded.home == Fixture.home())
-    #expect(throws: BlahError.invalidProfile) { try UserProfile(channel.profile) }
-    #expect(throws: BlahError.invalidProfile) { try UserProfile(data: [0x80]) }
+    #expect(throws: BlahError.invalidProfile) { try UserProfile(record: channel.profile.record) }
+    let plain = try await BasicIdentity<ProfileRecord>(ProfileFields(), using: backend)
+    #expect(throws: BlahError.invalidProfile) { try AnyBlahProfile(record: plain.profile) }
   }
 
   @Test func aDCProfileCarriesItsEndpoints() async throws {
-    let dc = DCProfile(
-      domains: ["one.example"], endpoints: [.init(host: "mtproto.one.example", port: 443, tls: true)],
+    let dc = DCProfile.Content(
+      domains: [try DomainName("one.example")],
+      endpoints: [.init(host: "mtproto.one.example", port: 443, tls: true)],
       bidcomEndpoints: [.init(host: "peer.one.example", port: 8443, tls: true)],
       transportPublicKey: "-----BEGIN RSA PUBLIC KEY-----", namespaceGeneration: 11)
-    let identity = try await Identity(dc, using: backend)
-    #expect(try DCProfile(identity.profile) == dc)
-    #expect(try AnyBlahProfile(identity.profile).home == nil)
+    var identity = try await BasicIdentity<DCProfile>(dc, using: backend)
+    #expect(try DCProfile(encoding: identity.profile.encoding).content == dc)
+    #expect(try AnyBlahProfile(encoding: identity.profile.encoding).content == .dc(dc))
     var unreachable = dc
     unreachable.bidcomEndpoints = []
-    #expect(try DCProfile(data: unreachable.encoded()).bidcomEndpoints.isEmpty)
+    #expect(try await identity.update(unreachable).bidcomEndpoints.isEmpty)
     unreachable = dc
     unreachable.endpoints[0].host = "user@host"
-    #expect(throws: BlahError.invalidProfile) { try unreachable.encoded() }
+    #expect(throws: BlahError.invalidProfile) { try DCProfile.fields(for: unreachable) }
+    unreachable = dc
+    unreachable.domains = []
+    #expect(throws: BlahError.invalidName) { try DCProfile.fields(for: unreachable) }
   }
 
   @Test func websocketEndpointsHaveExplicitTransportAndSignedPaths() async throws {
     let endpoint = DCProfile.Endpoint(host: "ws.example", port: 443, tls: true,
       transport: .webSocket, path: "/apiws?route=dc1")
-    let dc = DCProfile(domains: ["dc.example"], endpoints: [endpoint],
+    let dc = DCProfile.Content(domains: [try DomainName("dc.example")], endpoints: [endpoint],
       bidcomEndpoints: [], transportPublicKey: "rsa", namespaceGeneration: 1)
-    let identity = try await Identity(dc, using: backend)
+    let identity = try await BasicIdentity<DCProfile>(dc, using: backend)
     try await identity.profile.verify(using: backend)
-    #expect(try DCProfile(identity.profile) == dc)
+    #expect(try DCProfile(encoding: identity.profile.encoding).content == dc)
     for path: String? in [nil, "", "apiws", "//other.example/", "/x#fragment", "/x\n", "/a\\b",
       "/" + String(repeating: "x", count: 2048)] {
       var invalid = dc
       invalid.endpoints[0].path = path
-      #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
+      #expect(throws: BlahError.invalidProfile) { try DCProfile.fields(for: invalid) }
     }
     var invalid = dc
     invalid.bidcomEndpoints = [endpoint]
-    #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
+    #expect(throws: BlahError.invalidProfile) { try DCProfile.fields(for: invalid) }
     invalid = dc
     invalid.endpoints[0].transport = .tcp
-    #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
+    #expect(throws: BlahError.invalidProfile) { try DCProfile.fields(for: invalid) }
     invalid = dc
     invalid.endpoints.append(endpoint)
-    #expect(throws: BlahError.invalidProfile) { try invalid.encoded() }
+    #expect(throws: BlahError.invalidProfile) { try DCProfile.fields(for: invalid) }
   }
 }

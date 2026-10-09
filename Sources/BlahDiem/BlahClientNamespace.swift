@@ -18,9 +18,9 @@ public struct ClientNamespace: Hashable, Sendable {
 
   /// The namespace of `profile`'s account at `dc`. `profile` is a verified profile whose
   /// home is `dc`.
-  public init(profile: Profile, dc: DCAddress, generation: UInt64) throws(BlahError) {
+  public init(profile: some BlahProfile, dc: DCAddress, generation: UInt64) throws(BlahError) {
     guard (1...UInt64(Int64.max)).contains(generation) else { throw .wrongNamespace }
-    guard let home = try? profile.blahHome, home.dc == dc.id else {
+    guard let home = profile.home, home.dc == dc.id else {
       throw .wrongHome
     }
     identityID = profile.id
@@ -34,7 +34,7 @@ public struct ClientNamespace: Hashable, Sendable {
     CBOR.record([
       Self.cborKeyTag: .unsigned(BlahTag.clientNamespace.rawValue),
       Self.cborKeyVersion: .unsigned(1), Self.cborKeyIdentityID: .bytes(identityID.bytes),
-      Self.cborKeyDCDomain: .text(dc.domain), Self.cborKeyDCID: .bytes(dc.id.bytes),
+      Self.cborKeyDCDomain: .text(dc.domain.name), Self.cborKeyDCID: .bytes(dc.id.bytes),
       Self.cborKeyGeneration: .unsigned(generation), Self.cborKeyHomeEpoch: .unsigned(homeEpoch),
     ]).encoded
   }
@@ -43,8 +43,8 @@ public struct ClientNamespace: Hashable, Sendable {
   public var identifier: String { Digest(hashing: encoding).description }
 
   /// Throws unless `profile` belongs to this namespace.
-  public func require(_ profile: Profile) throws(BlahError) {
-    guard let home = try? profile.blahHome, home.dc == dc.id else {
+  public func require(_ profile: some BlahProfile) throws(BlahError) {
+    guard let home = profile.home, home.dc == dc.id else {
       throw .wrongHome
     }
     guard profile.id == identityID, home.epoch == homeEpoch else { throw .wrongNamespace }

@@ -3,15 +3,12 @@ public struct DCProfile: BlahProfile {
   /// A DC's user account is permanently hosted by that same identity.
   public static let accountID: Int64 = 777000
   public static let accountEpoch: UInt64 = 1
-  /// CBOR field keys.
-  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
-  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
-  public static let cborKeyKind: UInt64 = 2
-  public static let cborKeyDomains: UInt64 = 3
-  public static let cborKeyEndpoints: UInt64 = 4
-  public static let cborKeyBIDCOMEndpoints: UInt64 = 5
-  public static let cborKeyTransportPublicKey: UInt64 = 6
-  public static let cborKeyNamespaceGeneration: UInt64 = 7
+  /// CBOR field keys in the signed profile content.
+  public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
+  public static let cborKeyEndpoints: UInt64 = UserProfile.cborKeyHome + 1
+  public static let cborKeyBIDCOMEndpoints: UInt64 = cborKeyEndpoints + 1
+  public static let cborKeyTransportPublicKey: UInt64 = cborKeyBIDCOMEndpoints + 1
+  public static let cborKeyNamespaceGeneration: UInt64 = cborKeyTransportPublicKey + 1
 
   /// The transport carrying MTProto; TLS is independent of the transport.
   public enum Transport: UInt64, Sendable {
@@ -45,101 +42,126 @@ public struct DCProfile: BlahProfile {
   }
 
   public static let maximumEndpoints = 8
+  public static var domainCount: ClosedRange<Int> { 1...ProfileFields.maximumDomains }
 
-  /// The DC's discovery domains.
-  public var domains: [String]
-  /// MTProto endpoints for clients.
-  public var endpoints: [Endpoint]
-  /// BIDCOM endpoints for peer DCs.
-  public var bidcomEndpoints: [Endpoint]
-  /// The MTProto RSA public key, PEM-encoded.
-  public var transportPublicKey: String
-  /// The DC's database generation. A new generation starts a new client namespace.
-  public var namespaceGeneration: UInt64?
+  public struct Content: Hashable, Sendable {
+    /// The DC's discovery domains.
+    public var domains: [DomainName]
+    /// MTProto endpoints for clients.
+    public var endpoints: [Endpoint]
+    /// BIDCOM endpoints for peer DCs.
+    public var bidcomEndpoints: [Endpoint]
+    /// The MTProto RSA public key, PEM-encoded.
+    public var transportPublicKey: String
+    /// The DC's database generation. A new generation starts a new client namespace.
+    public var namespaceGeneration: UInt64?
 
-  public init(
-    domains: [String], endpoints: [Endpoint], bidcomEndpoints: [Endpoint],
-    transportPublicKey: String, namespaceGeneration: UInt64? = nil
-  ) {
-    self.domains = domains
-    self.endpoints = endpoints
-    self.bidcomEndpoints = bidcomEndpoints
-    self.transportPublicKey = transportPublicKey
-    self.namespaceGeneration = namespaceGeneration
-  }
+    public init(
+      domains: [DomainName], endpoints: [Endpoint], bidcomEndpoints: [Endpoint],
+      transportPublicKey: String, namespaceGeneration: UInt64? = nil
+    ) {
+      self.domains = domains
+      self.endpoints = endpoints
+      self.bidcomEndpoints = bidcomEndpoints
+      self.transportPublicKey = transportPublicKey
+      self.namespaceGeneration = namespaceGeneration
+    }
 
-  public init(data: [UInt8]) throws(BlahError) {
-    let e = BlahError.invalidProfile
-    let fields = try CBOR.record(
-      data, tag: .profile, requiredKeys: Self.cborKeyTag..<(Self.cborKeyNamespaceGeneration + 1),
-      error: e)
-    guard fields[Self.cborKeyKind]! == .unsigned(ProfileKind.dc.rawValue) else { throw e }
-    func endpoints(_ value: CBOR) throws(BlahError) -> [Endpoint] {
-      var result: [Endpoint] = []
-      for entry in try value.array(e) {
-        let a = try entry.record(e, requiredKeys: Endpoint.cborKeyHost..<(Endpoint.cborKeyPath + 1))
-        guard let port = UInt16(exactly: try a[Endpoint.cborKeyPort]!.unsigned(e)),
-          case .bool(let tls) = a[Endpoint.cborKeyTLS]!,
-          let transport = Transport(rawValue: try a[Endpoint.cborKeyTransport]!.unsigned(e))
-        else {
-          throw e
+    init(fields: ProfileFields) throws(BlahError) {
+      let e = BlahError.invalidProfile
+      let a = fields.application
+      guard try HostedRecord.kind(of: fields) == .dc,
+        (DCProfile.cborKeyEndpoints...DCProfile.cborKeyNamespaceGeneration).allSatisfy({ a[$0] != nil })
+      else { throw e }
+      func endpoints(_ value: CBOR) throws(BlahError) -> [Endpoint] {
+        var result: [Endpoint] = []
+        for entry in try value.array(e) {
+          let a = try entry.record(e, requiredKeys: Endpoint.cborKeyHost..<(Endpoint.cborKeyPath + 1))
+          guard let port = UInt16(exactly: try a[Endpoint.cborKeyPort]!.unsigned(e)),
+            case .bool(let tls) = a[Endpoint.cborKeyTLS]!,
+            let transport = Transport(rawValue: try a[Endpoint.cborKeyTransport]!.unsigned(e))
+          else {
+            throw e
+          }
+          result.append(
+            Endpoint(
+              host: try a[Endpoint.cborKeyHost]!.text(e), port: port, tls: tls,
+              transport: transport,
+              path: a[Endpoint.cborKeyPath]! == .null ? nil : try a[Endpoint.cborKeyPath]!.text(e)))
         }
-        result.append(
-          Endpoint(
-            host: try a[Endpoint.cborKeyHost]!.text(e), port: port, tls: tls,
-            transport: transport,
-            path: a[Endpoint.cborKeyPath]! == .null ? nil : try a[Endpoint.cborKeyPath]!.text(e)))
+        return result
       }
-      return result
+      self.init(
+        domains: fields.domains,
+        endpoints: try endpoints(a[DCProfile.cborKeyEndpoints]!),
+        bidcomEndpoints: try endpoints(a[DCProfile.cborKeyBIDCOMEndpoints]!),
+        transportPublicKey: try a[DCProfile.cborKeyTransportPublicKey]!.text(e),
+        namespaceGeneration: a[DCProfile.cborKeyNamespaceGeneration]! == .null
+          ? nil : try a[DCProfile.cborKeyNamespaceGeneration]!.unsigned(e))
+      try validate()
     }
-    var domains: [String] = []
-    for domain in try fields[Self.cborKeyDomains]!.array(e) { domains.append(try domain.text(e)) }
-    self.domains = domains
-    self.endpoints = try endpoints(fields[Self.cborKeyEndpoints]!)
-    self.bidcomEndpoints = try endpoints(fields[Self.cborKeyBIDCOMEndpoints]!)
-    self.transportPublicKey = try fields[Self.cborKeyTransportPublicKey]!.text(e)
-    self.namespaceGeneration =
-      fields[Self.cborKeyNamespaceGeneration]! == .null
-      ? nil : try fields[Self.cborKeyNamespaceGeneration]!.unsigned(e)
-    try validate()
+
+    var fields: ProfileFields {
+      get throws(BlahError) {
+        try validate()
+        func encode(_ endpoints: [Endpoint]) -> CBOR {
+          .array(
+            endpoints.map {
+              .record([
+                Endpoint.cborKeyHost: .text($0.host), Endpoint.cborKeyPort: .unsigned(UInt64($0.port)),
+                Endpoint.cborKeyTLS: .bool($0.tls),
+                Endpoint.cborKeyTransport: .unsigned($0.transport.rawValue),
+                Endpoint.cborKeyPath: $0.path.map(CBOR.text) ?? .null,
+              ])
+            })
+        }
+        return ProfileFields(domains: domains, application: [
+          DCProfile.cborKeyKind: .unsigned(ProfileKind.dc.rawValue),
+          DCProfile.cborKeyEndpoints: encode(endpoints),
+          DCProfile.cborKeyBIDCOMEndpoints: encode(bidcomEndpoints),
+          DCProfile.cborKeyTransportPublicKey: .text(transportPublicKey),
+          DCProfile.cborKeyNamespaceGeneration: namespaceGeneration.map(CBOR.unsigned) ?? .null,
+        ])
+      }
+    }
+
+    private func validate() throws(BlahError) {
+      try HostedRecord.validate(domains: domains, count: DCProfile.domainCount)
+      let valid = [endpoints, bidcomEndpoints].allSatisfy { list in
+        list.count <= DCProfile.maximumEndpoints && Set(list).count == list.count
+          && list.allSatisfy { $0.isValid }
+      }
+      guard valid, !endpoints.isEmpty, bidcomEndpoints.allSatisfy({ $0.transport == .tcp }),
+        !transportPublicKey.isEmpty, transportPublicKey.utf8.count <= 8192,
+        namespaceGeneration.map({ (1...UInt64(Int64.max)).contains($0) }) ?? true
+      else { throw .invalidProfile }
+    }
   }
 
-  public func encoded() throws(BlahError) -> [UInt8] {
-    try validate()
-    func encode(_ endpoints: [Endpoint]) -> CBOR {
-      .array(
-        endpoints.map {
-          .record([
-            Endpoint.cborKeyHost: .text($0.host), Endpoint.cborKeyPort: .unsigned(UInt64($0.port)),
-            Endpoint.cborKeyTLS: .bool($0.tls),
-            Endpoint.cborKeyTransport: .unsigned($0.transport.rawValue),
-            Endpoint.cborKeyPath: $0.path.map(CBOR.text) ?? .null,
-          ])
-        })
-    }
-    return CBOR.record([
-      Self.cborKeyTag: .unsigned(BlahTag.profile.rawValue), Self.cborKeyVersion: .unsigned(1),
-      Self.cborKeyKind: .unsigned(ProfileKind.dc.rawValue),
-      Self.cborKeyDomains: .array(domains.map(CBOR.text)), Self.cborKeyEndpoints: encode(endpoints),
-      Self.cborKeyBIDCOMEndpoints: encode(bidcomEndpoints),
-      Self.cborKeyTransportPublicKey: .text(transportPublicKey),
-      Self.cborKeyNamespaceGeneration: namespaceGeneration.map(CBOR.unsigned) ?? .null,
-    ]).encoded
+  public let record: ProfileRecord
+  public let content: Content
+
+  public init(record: ProfileRecord) throws(BlahError) {
+    content = try Content(fields: record.fields)
+    self.record = record
   }
 
-  private func validate() throws(BlahError) {
-    guard (1...HostedRecord.maximumDomains).contains(domains.count),
-      Set(domains).count == domains.count, domains.allSatisfy(DomainName.isValid)
-    else { throw .invalidName }
-    let valid = [endpoints, bidcomEndpoints].allSatisfy { list in
-      list.count <= Self.maximumEndpoints && Set(list).count == list.count
-        && list.allSatisfy { $0.isValid }
-    }
-    guard valid, !endpoints.isEmpty, bidcomEndpoints.allSatisfy({ $0.transport == .tcp }),
-      !transportPublicKey.isEmpty, transportPublicKey.utf8.count <= 8192,
-      namespaceGeneration.map({ (1...UInt64(Int64.max)).contains($0) }) ?? true
-    else { throw .invalidProfile }
+  public static func fields(for content: Content) throws(BlahError) -> ProfileFields {
+    try content.fields
   }
+
+  /// The DC's own user account, hosted by this identity until the profile expires.
+  public var home: Home? {
+    Home(dc: id, epoch: Self.accountEpoch, expiresAt: validity.expiresAt, account: Self.accountID)
+  }
+  /// MTProto endpoints for clients.
+  public var endpoints: [Endpoint] { content.endpoints }
+  /// BIDCOM endpoints for peer DCs.
+  public var bidcomEndpoints: [Endpoint] { content.bidcomEndpoints }
+  /// The MTProto RSA public key, PEM-encoded.
+  public var transportPublicKey: String { content.transportPublicKey }
+  /// The DC's database generation. A new generation starts a new client namespace.
+  public var namespaceGeneration: UInt64? { content.namespaceGeneration }
 }
 
 extension DCProfile.Endpoint {

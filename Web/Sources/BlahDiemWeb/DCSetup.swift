@@ -42,20 +42,19 @@ import JavaScriptKit
       throw BlahError.invalidProfile
     }
     let backend = BrowserBackend(now: now, crypto: crypto)
-    let data = try DCProfile(data: input.data).encoded()
+    guard case .dc(let content) = try AnyBlahProfile.Content(fields: ProfileFields(encoding: input.data))
+    else { throw BlahError.invalidProfile }
     let identityKey = try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity))
     let deviceKey = try await DevicePrivateKey(backend.makePrivateKey(.ed25519, for: .device))
-    var identity: Identity
+    var identity: BasicIdentity<DCProfile>
     if let profile = input.profile {
-      let existing = try Profile(encoding: profile)
-      _ = try DCProfile(existing)
-      identity = try await Identity(profile: existing,
+      identity = try await BasicIdentity(profile: DCProfile(encoding: profile),
         deviceKey: deviceKey, identityKey: identityKey,
         profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       try await identity.renew()
-      try await identity.update(data: data)
+      try await identity.update(content)
     } else {
-      identity = try await Identity(data: data, identityKey: identityKey, deviceKey: deviceKey,
+      identity = try await BasicIdentity(content, identityKey: identityKey, deviceKey: deviceKey,
         profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
     }
     return DCSetupResult(id: identity.id.description, profile: identity.profile.encoding,

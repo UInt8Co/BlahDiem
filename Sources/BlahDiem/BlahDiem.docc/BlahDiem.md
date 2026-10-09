@@ -4,12 +4,13 @@ Blah profiles and proofs on Diem identities, shared by Blah clients and DCs.
 
 ## Overview
 
-Every Blah account, bot, channel, sticker set and DC is a Diem identity. Its profile
-carries a Blah profile as data, and its devices sign the DC's challenges as Blah proofs.
+Every Blah account, bot, channel, sticker set and DC is a Diem identity. Each Blah
+profile type is a Diem `DomainNamedProfile`, and its devices sign the DC's challenges as
+Blah proofs.
 
 ```swift
-var user = UserProfile(home: Home(dc: dc.id, epoch: 1, expiresAt: expiry), domains: domains)
-var identity = try await Identity(user, using: backend)
+var user = HostedContent(home: Home(dc: dc.id, epoch: 1, expiresAt: expiry), domains: domains)
+var identity = try await BasicIdentity<UserProfile>(user, using: backend)
 user.home?.account = accountID
 try await identity.update(user)
 let proof = try await identity.prove(loginChallenge)
@@ -30,9 +31,8 @@ let proof = try await identity.prove(loginChallenge)
 - ``StickerSetProfile``
 - ``DCProfile``
 - ``AnyBlahProfile``
+- ``HostedContent``
 - ``Home``
-- ``ProfileDomain``
-- ``DomainName``
 - ``DCAddress``
 
 ### Proofs

@@ -10,13 +10,12 @@ enum BlahTag: UInt64 {
   case accountLink = 8
   case dcAdmin = 9
   case clientNamespace = 10
-  case profile = 13
   case keyFile = 14
   case keyFileContents = 15
   case privateKey = 16
 }
 
-/// Profile kind codes in Blah profile data.
+/// Profile kind codes, at ``UserProfile/cborKeyKind`` in every Blah profile.
 enum ProfileKind: UInt64 {
   case user = 1
   case channel = 2
@@ -43,6 +42,10 @@ extension CBOR {
 
   func field<T>(_ failure: BlahError, _ read: (CBOR) throws(DiemError) -> T) throws(BlahError) -> T {
     do { return try read(self) } catch { throw failure }
+  }
+
+  func domain(_ error: BlahError) throws(BlahError) -> DomainName {
+    try field(error) { value throws(DiemError) in try DomainName(value.textValue()) }
   }
 
   func digest(_ error: BlahError) throws(BlahError) -> Digest {

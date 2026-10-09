@@ -34,11 +34,11 @@ public struct KeyFileContents: Sendable {
   public static let cborKeyKeys: UInt64 = 3
   public static let cborKeyMetadata: UInt64 = 4
 
-  public let profile: Profile
+  public let profile: AnyBlahProfile
   public let keys: [KeyFilePrivateKey]
   public let metadata: CBOR
 
-  public init(profile: Profile, keys: [KeyFilePrivateKey], metadata: CBOR = .map([:])) throws {
+  public init(profile: AnyBlahProfile, keys: [KeyFilePrivateKey], metadata: CBOR = .map([:])) throws {
     guard (1...2).contains(keys.count), case .map = metadata,
       Set(keys.map { $0.publicKey.purpose }).count == keys.count else { throw DiemError.invalidKey }
     for key in keys {
@@ -60,7 +60,7 @@ public struct KeyFileContents: Sendable {
 
   public init(encoding: [UInt8]) throws {
     let fields = try CBOR.record(encoding, tag: .keyFileContents, requiredKeys: 0..<5, error: .invalidProfile)
-    try self.init(profile: Profile(encoding: fields[2]!.bytesValue()),
+    try self.init(profile: AnyBlahProfile(encoding: fields[2]!.bytesValue()),
       keys: fields[3]!.arrayValue().map { try KeyFilePrivateKey(encoding: $0.bytesValue()) },
       metadata: fields[4]!)
   }
@@ -73,7 +73,6 @@ public struct KeyFileContents: Sendable {
   /// Checks signatures and private/public correspondence. Expired profiles remain recoverable;
   /// applications still require current published authority before login.
   public func validate(using backend: some CryptoBackend) async throws {
-    _ = try AnyBlahProfile(profile)
     try await profile.verify(using: backend, at: profile.validity.notBefore)
     for key in keys {
       let restored = try await backend.makePrivateKey(key.publicKey.algorithm,

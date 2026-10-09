@@ -63,7 +63,7 @@ public struct LoginChallenge: BlahStatement {
       identityID: a[Self.cborKeyIdentityID]!.digest(e),
       deviceID: a[Self.cborKeyDeviceID]!.digest(e),
       profileDigest: a[Self.cborKeyProfileDigest]!.digest(e),
-      dc: DCAddress(domain: a[Self.cborKeyDCDomain]!.text(e), id: a[Self.cborKeyDCID]!.digest(e)),
+      dc: CBOR.dcAddress(a, domain: Self.cborKeyDCDomain, id: Self.cborKeyDCID, error: e),
       authKeyID: Int64(bitPattern: a[Self.cborKeyAuthKeyID]!.unsigned(e)),
       sessionID: a[Self.cborKeySessionID]!.unsigned(e))
     extensionFields = a.filter { $0.key > Self.cborKeySessionID }
@@ -78,7 +78,7 @@ public struct LoginChallenge: BlahStatement {
         Self.cborKeyIdentityID: .bytes(identityID.bytes),
         Self.cborKeyDeviceID: .bytes(deviceID.bytes),
         Self.cborKeyProfileDigest: .bytes(profileDigest.bytes),
-        Self.cborKeyDCDomain: .text(dc.domain), Self.cborKeyDCID: .bytes(dc.id.bytes),
+        Self.cborKeyDCDomain: .text(dc.domain.name), Self.cborKeyDCID: .bytes(dc.id.bytes),
         Self.cborKeyAuthKeyID: .unsigned(UInt64(bitPattern: authKeyID)),
         Self.cborKeySessionID: .unsigned(sessionID),
       ], extensions: extensionFields
@@ -86,7 +86,9 @@ public struct LoginChallenge: BlahStatement {
   }
 
   /// Requires a live challenge for this identity, device and profile, from its home DC.
-  public func validate(for identity: Identity) throws(BlahError) {
+  public func validate<I: Identity>(for identity: I) throws(BlahError)
+    where I.Profile: BlahProfile
+  {
     try identity.requireLive(until: expiresAt)
     guard identityID == identity.id, deviceID == identity.deviceKey.publicKey.id,
       profileDigest == identity.profile.digest

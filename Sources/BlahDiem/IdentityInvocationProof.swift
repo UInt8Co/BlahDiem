@@ -13,7 +13,7 @@ public struct InvocationChallenge: Hashable, Sendable {
 
   private var extensionFields: [UInt64: CBOR] = [:]
 
-  public let domain: String
+  public let domain: DomainName
   public let nonce: [UInt8]
   public let expiresAt: UInt64
   /// The issuing DC's identity ID.
@@ -22,10 +22,10 @@ public struct InvocationChallenge: Hashable, Sendable {
   public let sessionID: UInt64
 
   public init(
-    domain: String, nonce: [UInt8], expiresAt: UInt64, dc: Digest, transportKeyID: Int64,
+    domain: DomainName, nonce: [UInt8], expiresAt: UInt64, dc: Digest, transportKeyID: Int64,
     sessionID: UInt64
   ) throws(BlahError) {
-    guard DomainName.isValid(domain), nonce.count == 32, expiresAt <= UInt64(Int64.max),
+    guard nonce.count == 32, expiresAt <= UInt64(Int64.max),
       transportKeyID != 0, sessionID != 0
     else { throw .invalidChallenge }
     self.domain = domain
@@ -42,7 +42,7 @@ public struct InvocationChallenge: Hashable, Sendable {
       encoding, tag: .invocationChallenge,
       requiredKeys: Self.cborKeyTag..<(Self.cborKeySessionID + 1), error: e)
     try self.init(
-      domain: a[Self.cborKeyDomain]!.text(e), nonce: a[Self.cborKeyNonce]!.bytes(e),
+      domain: a[Self.cborKeyDomain]!.domain(e), nonce: a[Self.cborKeyNonce]!.bytes(e),
       expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), dc: a[Self.cborKeyDC]!.digest(e),
       transportKeyID: Int64(bitPattern: a[Self.cborKeyTransportKeyID]!.unsigned(e)),
       sessionID: a[Self.cborKeySessionID]!.unsigned(e))
@@ -53,7 +53,7 @@ public struct InvocationChallenge: Hashable, Sendable {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.invocationChallenge.rawValue),
-        Self.cborKeyVersion: .unsigned(1), Self.cborKeyDomain: .text(domain),
+        Self.cborKeyVersion: .unsigned(1), Self.cborKeyDomain: .text(domain.name),
         Self.cborKeyNonce: .bytes(nonce),
         Self.cborKeyExpiresAt: .unsigned(expiresAt), Self.cborKeyDC: .bytes(dc.bytes),
         Self.cborKeyTransportKeyID: .unsigned(UInt64(bitPattern: transportKeyID)),
@@ -109,9 +109,10 @@ public struct InvocationStatement: BlahStatement {
   public func matches(_ payload: [UInt8]) -> Bool { payloadDigest == SHA2.sha512(payload) }
 
   /// Requires a live challenge for a domain that serves this identity's profile.
-  public func validate(for identity: Identity) throws(BlahError) {
+  public func validate<I: Identity>(for identity: I) throws(BlahError)
+    where I.Profile: BlahProfile
+  {
     try identity.requireLive(until: challenge.expiresAt)
-    guard (try? AnyBlahProfile(identity.profile))?.domains.contains(challenge.domain) == true
-    else { throw .invalidChallenge }
+    guard identity.profile.serves(challenge.domain) else { throw .invalidChallenge }
   }
 }

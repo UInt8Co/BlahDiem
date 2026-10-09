@@ -72,7 +72,7 @@ public struct OAuthConsentChallenge: BlahStatement {
     var scopes: [String] = []
     for scope in try a[Self.cborKeyScopes]!.array(e) { scopes.append(try scope.text(e)) }
     try self.init(
-      dc: DCAddress(domain: a[Self.cborKeyDCDomain]!.text(e), id: a[Self.cborKeyDCID]!.digest(e)),
+      dc: CBOR.dcAddress(a, domain: Self.cborKeyDCDomain, id: Self.cborKeyDCID, error: e),
       nonce: a[Self.cborKeyNonce]!.bytes(e),
       expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), appID: a[Self.cborKeyAppID]!.unsigned(e),
       appName: a[Self.cborKeyAppName]!.text(e),
@@ -87,7 +87,7 @@ public struct OAuthConsentChallenge: BlahStatement {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.oauthConsent.rawValue),
-        Self.cborKeyVersion: .unsigned(1), Self.cborKeyDCDomain: .text(dc.domain),
+        Self.cborKeyVersion: .unsigned(1), Self.cborKeyDCDomain: .text(dc.domain.name),
         Self.cborKeyDCID: .bytes(dc.id.bytes),
         Self.cborKeyNonce: .bytes(nonce), Self.cborKeyExpiresAt: .unsigned(expiresAt),
         Self.cborKeyAppID: .unsigned(appID), Self.cborKeyAppName: .text(appName),
@@ -100,7 +100,9 @@ public struct OAuthConsentChallenge: BlahStatement {
   }
 
   /// Requires a live challenge from the identity's home DC.
-  public func validate(for identity: Identity) throws(BlahError) {
+  public func validate<I: Identity>(for identity: I) throws(BlahError)
+    where I.Profile: BlahProfile
+  {
     try identity.requireLive(until: expiresAt)
     try identity.requireHome(dc.id)
   }

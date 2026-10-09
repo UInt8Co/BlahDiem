@@ -66,25 +66,25 @@ import JavaScriptKit
     switch kind {
     case "invocation":
       let c = try InvocationChallenge(encoding: encoding)
-      info.dc = c.dc.bytes; info.domain = c.domain; info.nonce = c.nonce
+      info.dc = c.dc.bytes; info.domain = c.domain.name; info.nonce = c.nonce
       info.expiresAt = String(c.expiresAt)
       info.keyID = String(UInt64(bitPattern: c.transportKeyID)); info.sessionID = String(c.sessionID)
     case "login":
       let c = try LoginChallenge(encoding: encoding)
-      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain; info.nonce = c.nonce
+      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain.name; info.nonce = c.nonce
       info.expiresAt = String(c.expiresAt); info.operation = c.operation == .signUp ? "signUp" : "signIn"
       info.keyID = String(UInt64(bitPattern: c.authKeyID)); info.sessionID = String(c.sessionID)
       info.identityID = c.identityID.bytes; info.deviceID = c.deviceID.bytes
       info.profileDigest = c.profileDigest.bytes
     case "oauthConsent":
       let c = try OAuthConsentChallenge(encoding: encoding)
-      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain; info.nonce = c.nonce
+      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain.name; info.nonce = c.nonce
       info.expiresAt = String(c.expiresAt); info.appID = String(c.appID); info.appName = c.appName
       info.appVersion = String(c.appVersion); info.redirectURI = c.redirectURI; info.scopes = c.scopes
       info.codeChallenge = c.codeChallenge; info.state = c.state; info.oidcNonce = c.oidcNonce
     case "accountLink":
       let c = try AccountLinkChallenge(encoding: encoding)
-      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain; info.nonce = c.nonce
+      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain.name; info.nonce = c.nonce
       info.expiresAt = String(c.expiresAt)
       switch c.operation {
       case .read: info.operation = "read"
@@ -96,7 +96,7 @@ import JavaScriptKit
       info.externalID = c.externalID; info.previousExternalID = c.previousExternalID; info.label = c.label
     case "dcAdmin":
       let c = try DCAdminChallenge(encoding: encoding)
-      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain; info.nonce = c.nonce
+      info.dc = c.dc.id.bytes; info.dcDomain = c.dc.domain.name; info.nonce = c.nonce
       info.expiresAt = String(c.expiresAt); info.revision = String(c.revision); info.document = c.document
       switch c.operation {
       case .read: info.operation = "read"
@@ -111,7 +111,7 @@ import JavaScriptKit
   }
 }
 
-func proveChallenge(_ input: IdentityRequest, identity: Identity, home: Home) async throws -> [UInt8] {
+func proveChallenge(_ input: IdentityRequest, identity: BasicIdentity<AnyBlahProfile>, home: Home) async throws -> [UInt8] {
   let encoding = input.challenge ?? []
   let kind = input.challengeKind ?? ""
   let info = try inspectChallenge(kind: kind, encoding: encoding)

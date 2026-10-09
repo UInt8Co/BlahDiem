@@ -1,14 +1,9 @@
-/// Blah data carried in a Diem `Profile`.
-public protocol BlahProfile: Sendable, Hashable {
-  /// Decodes Blah profile data.
-  init(data: [UInt8]) throws(BlahError)
-  /// The canonical profile data.
-  func encoded() throws(BlahError) -> [UInt8]
-}
-
-extension BlahProfile {
-  /// Decodes the Blah data of `profile`.
-  public init(_ profile: Profile) throws(BlahError) { try self.init(data: profile.data) }
+/// A Diem profile of a Blah identity: named by the domains that serve it, with a profile
+/// kind and that kind's fields signed as application fields.
+public protocol BlahProfile: DomainNamedProfile {
+  /// The account hosting that proofs and client namespaces rely on. A DC is a special
+  /// user permanently hosted by itself; its hosting expires with the profile.
+  var home: Home? { get }
 }
 
 /// The DC hosting an account, and the account it allocated there.
@@ -39,141 +34,154 @@ public struct Home: Hashable, Sendable {
   public func isActive(at time: UInt64) -> Bool { time < expiresAt }
 }
 
-/// A person's profile.
-public struct UserProfile: BlahProfile {
-  /// CBOR field keys.
-  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
-  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
-  public static let cborKeyKind: UInt64 = 2
-  public static let cborKeyHome: UInt64 = 3
-  public static let cborKeyDomains: UInt64 = 4
-
+/// The content of a user, bot or channel profile.
+public struct HostedContent: Hashable, Sendable {
   public var home: Home?
-  /// The domains that serve this profile.
-  public var domains: [ProfileDomain]
+  /// The domains that serve the profile. Every one is a public username candidate.
+  public var domains: [DomainName]
 
-  public init(home: Home?, domains: [ProfileDomain] = []) {
+  public init(home: Home?, domains: [DomainName] = []) {
     self.home = home
     self.domains = domains
   }
 
-  public init(data: [UInt8]) throws(BlahError) {
-    (home, domains) = try HostedRecord.decode(data, kind: .user)
-  }
-
-  public func encoded() throws(BlahError) -> [UInt8] {
-    try HostedRecord.encode(kind: .user, home: home, domains: domains)
-  }
-
   /// The first domain. Setting this replaces the domain list with that one name.
-  public var username: String? {
-    get { domains.username }
-    set { domains.username = newValue }
+  public var username: DomainName? {
+    get { domains.first }
+    set { domains = newValue.map { [$0] } ?? [] }
   }
+}
+
+/// A person's profile.
+public struct UserProfile: BlahProfile {
+  /// CBOR field keys in the signed profile content.
+  public static let cborKeyKind: UInt64 = ProfileFields.firstApplicationKey
+  public static let cborKeyHome: UInt64 = cborKeyKind + 1
+
+  public let record: ProfileRecord
+  public let content: HostedContent
+
+  public init(record: ProfileRecord) throws(BlahError) {
+    content = try HostedRecord.decode(record.fields, kind: .user)
+    self.record = record
+  }
+
+  public static func fields(for content: HostedContent) throws(BlahError) -> ProfileFields {
+    try HostedRecord.encode(content, kind: .user)
+  }
+
+  public var home: Home? { content.home }
+  /// The first domain.
+  public var username: DomainName? { content.username }
 }
 
 /// A bot's profile.
 public struct BotProfile: BlahProfile {
-  /// CBOR field keys.
-  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
-  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
+  /// CBOR field keys in the signed profile content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
-  public static let cborKeyDomains: UInt64 = UserProfile.cborKeyDomains
 
-  public var home: Home?
-  /// The domains that serve this profile.
-  public var domains: [ProfileDomain]
+  public let record: ProfileRecord
+  public let content: HostedContent
 
-  public init(home: Home?, domains: [ProfileDomain] = []) {
-    self.home = home
-    self.domains = domains
+  public init(record: ProfileRecord) throws(BlahError) {
+    content = try HostedRecord.decode(record.fields, kind: .bot)
+    self.record = record
   }
 
-  public init(data: [UInt8]) throws(BlahError) {
-    (home, domains) = try HostedRecord.decode(data, kind: .bot)
+  public static func fields(for content: HostedContent) throws(BlahError) -> ProfileFields {
+    try HostedRecord.encode(content, kind: .bot)
   }
 
-  public func encoded() throws(BlahError) -> [UInt8] {
-    try HostedRecord.encode(kind: .bot, home: home, domains: domains)
-  }
-
-  /// The first domain. Setting this replaces the domain list with that one name.
-  public var username: String? {
-    get { domains.username }
-    set { domains.username = newValue }
-  }
+  public var home: Home? { content.home }
+  /// The first domain.
+  public var username: DomainName? { content.username }
 }
 
 /// A channel's or supergroup's profile.
 public struct ChannelProfile: BlahProfile {
-  /// CBOR field keys.
-  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
-  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
+  /// CBOR field keys in the signed profile content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
-  public static let cborKeyDomains: UInt64 = UserProfile.cborKeyDomains
 
-  public var home: Home?
-  /// The domains that serve this profile.
-  public var domains: [ProfileDomain]
+  public let record: ProfileRecord
+  public let content: HostedContent
 
-  public init(home: Home?, domains: [ProfileDomain] = []) {
-    self.home = home
-    self.domains = domains
+  public init(record: ProfileRecord) throws(BlahError) {
+    content = try HostedRecord.decode(record.fields, kind: .channel)
+    self.record = record
   }
 
-  public init(data: [UInt8]) throws(BlahError) {
-    (home, domains) = try HostedRecord.decode(data, kind: .channel)
+  public static func fields(for content: HostedContent) throws(BlahError) -> ProfileFields {
+    try HostedRecord.encode(content, kind: .channel)
   }
 
-  public func encoded() throws(BlahError) -> [UInt8] {
-    try HostedRecord.encode(kind: .channel, home: home, domains: domains)
-  }
-
-  /// The first domain. Setting this replaces the domain list with that one name.
-  public var username: String? {
-    get { domains.username }
-    set { domains.username = newValue }
-  }
+  public var home: Home? { content.home }
+  /// The first domain.
+  public var username: DomainName? { content.username }
 }
 
 /// A sticker or custom-emoji set's profile.
 public struct StickerSetProfile: BlahProfile {
-  /// CBOR field keys.
-  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
-  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
+  /// CBOR field keys in the signed profile content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
-  public static let cborKeyDomains: UInt64 = UserProfile.cborKeyDomains
 
-  public var home: Home?
-  /// The set's short name: the one domain that serves this profile.
-  public var shortName: String
+  public struct Content: Hashable, Sendable {
+    public var home: Home?
+    /// The set's short name: the one domain that serves its profile.
+    public var shortName: DomainName
 
-  public init(home: Home?, shortName: String) {
-    self.home = home
-    self.shortName = shortName
+    public init(home: Home?, shortName: DomainName) {
+      self.home = home
+      self.shortName = shortName
+    }
   }
 
-  public init(data: [UInt8]) throws(BlahError) {
-    let (home, domains) = try HostedRecord.decode(data, kind: .stickerSet)
-    self.home = home
-    shortName = domains[0].name
+  public static var domainCount: ClosedRange<Int> { 1...1 }
+
+  public let record: ProfileRecord
+  public let content: Content
+
+  public init(record: ProfileRecord) throws(BlahError) {
+    let hosted = try HostedRecord.decode(record.fields, kind: .stickerSet)
+    content = Content(home: hosted.home, shortName: hosted.domains[0])
+    self.record = record
   }
 
-  public func encoded() throws(BlahError) -> [UInt8] {
+  public static func fields(for content: Content) throws(BlahError) -> ProfileFields {
     try HostedRecord.encode(
-      kind: .stickerSet, home: home, domains: [ProfileDomain(shortName)])
+      HostedContent(home: content.home, domains: [content.shortName]), kind: .stickerSet)
   }
+
+  public var home: Home? { content.home }
+  /// The set's short name.
+  public var shortName: DomainName { content.shortName }
 }
 
 /// Any Blah profile, by kind.
-public enum AnyBlahProfile: Hashable, Sendable {
-  /// CBOR field keys.
-  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
-  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
-  public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
+public enum AnyBlahProfile: BlahProfile {
+  /// The content of any Blah profile, by kind.
+  public enum Content: Hashable, Sendable {
+    case user(HostedContent)
+    case bot(HostedContent)
+    case channel(HostedContent)
+    case stickerSet(StickerSetProfile.Content)
+    case dc(DCProfile.Content)
+
+    /// Decodes the content of signed or unsigned profile fields.
+    public init(fields: ProfileFields) throws(BlahError) {
+      switch try HostedRecord.kind(of: fields) {
+      case .user: self = .user(try HostedRecord.decode(fields, kind: .user))
+      case .bot: self = .bot(try HostedRecord.decode(fields, kind: .bot))
+      case .channel: self = .channel(try HostedRecord.decode(fields, kind: .channel))
+      case .stickerSet:
+        let hosted = try HostedRecord.decode(fields, kind: .stickerSet)
+        self = .stickerSet(.init(home: hosted.home, shortName: hosted.domains[0]))
+      case .dc: self = .dc(try DCProfile.Content(fields: fields))
+      }
+    }
+  }
 
   case user(UserProfile)
   case bot(BotProfile)
@@ -181,124 +189,101 @@ public enum AnyBlahProfile: Hashable, Sendable {
   case stickerSet(StickerSetProfile)
   case dc(DCProfile)
 
-  /// Decodes the Blah data of `profile`.
-  public init(_ profile: Profile) throws(BlahError) {
-    let fields = try CBOR.record(
-      profile.data, tag: .profile, requiredKeys: Self.cborKeyTag..<(Self.cborKeyKind + 1),
-      error: .invalidProfile)
-    switch ProfileKind(rawValue: try fields[Self.cborKeyKind]!.unsigned(.invalidProfile)) {
-    case .user: self = .user(try UserProfile(profile))
-    case .bot: self = .bot(try BotProfile(profile))
-    case .channel: self = .channel(try ChannelProfile(profile))
-    case .stickerSet: self = .stickerSet(try StickerSetProfile(profile))
-    case .dc: self = .dc(try DCProfile(profile))
-    case nil: throw .invalidProfile
+  public init(record: ProfileRecord) throws(BlahError) {
+    switch try HostedRecord.kind(of: record.fields) {
+    case .user: self = .user(try UserProfile(record: record))
+    case .bot: self = .bot(try BotProfile(record: record))
+    case .channel: self = .channel(try ChannelProfile(record: record))
+    case .stickerSet: self = .stickerSet(try StickerSetProfile(record: record))
+    case .dc: self = .dc(try DCProfile(record: record))
     }
   }
 
-  /// The home of a hosted identity; `nil` for DCs and unhosted identities.
+  public static func fields(for content: Content) throws(BlahError) -> ProfileFields {
+    switch content {
+    case .user(let c): try UserProfile.fields(for: c)
+    case .bot(let c): try BotProfile.fields(for: c)
+    case .channel(let c): try ChannelProfile.fields(for: c)
+    case .stickerSet(let c): try StickerSetProfile.fields(for: c)
+    case .dc(let c): try DCProfile.fields(for: c)
+    }
+  }
+
+  public var record: ProfileRecord {
+    switch self {
+    case .user(let p): p.record
+    case .bot(let p): p.record
+    case .channel(let p): p.record
+    case .stickerSet(let p): p.record
+    case .dc(let p): p.record
+    }
+  }
+
+  public var content: Content {
+    switch self {
+    case .user(let p): .user(p.content)
+    case .bot(let p): .bot(p.content)
+    case .channel(let p): .channel(p.content)
+    case .stickerSet(let p): .stickerSet(p.content)
+    case .dc(let p): .dc(p.content)
+    }
+  }
+
   public var home: Home? {
     switch self {
     case .user(let p): p.home
     case .bot(let p): p.home
     case .channel(let p): p.home
     case .stickerSet(let p): p.home
-    case .dc: nil
-    }
-  }
-
-  /// The domains that serve this profile.
-  public var domains: [String] {
-    switch self {
-    case .user(let p): p.domains.map { $0.name }
-    case .bot(let p): p.domains.map { $0.name }
-    case .channel(let p): p.domains.map { $0.name }
-    case .stickerSet(let p): [p.shortName]
-    case .dc(let p): p.domains
+    case .dc(let p): p.home
     }
   }
 }
 
-extension Profile {
-  /// The account hosting represented by this signed profile. A DC is a special
-  /// user permanently hosted by itself; its hosting expires with the profile.
-  public var blahHome: Home? {
-    get throws(BlahError) {
-      switch try AnyBlahProfile(self) {
-      case .dc:
-        Home(dc: id, epoch: DCProfile.accountEpoch, expiresAt: validity.expiresAt,
-          account: DCProfile.accountID)
-      case let profile: profile.home
-      }
-    }
-  }
-}
-
-extension [ProfileDomain] {
-  fileprivate var username: String? {
-    get { first?.name }
-    set {
-      self = newValue.map { [ProfileDomain(unchecked: $0)] } ?? []
-    }
-  }
-}
-
-/// Integer-keyed profile and home records; domains are a list of domain records.
+/// Blah's application fields: a kind and, for hosted kinds, a nullable home record.
 enum HostedRecord {
-  static let maximumDomains = 16
+  static func kind(of fields: ProfileFields) throws(BlahError) -> ProfileKind {
+    guard let value = fields.application[UserProfile.cborKeyKind],
+      let kind = ProfileKind(rawValue: try value.unsigned(.invalidProfile))
+    else { throw .invalidProfile }
+    return kind
+  }
 
-  static func encode(kind: ProfileKind, home: Home?, domains: [ProfileDomain]) throws(BlahError)
-    -> [UInt8]
-  {
-    try validate(kind: kind, home: home, domains: domains)
-    let homeValue: CBOR =
-      home.map {
+  static func encode(_ content: HostedContent, kind: ProfileKind) throws(BlahError) -> ProfileFields {
+    try validate(content, kind: kind)
+    let home: CBOR =
+      content.home.map {
         .record([
           Home.cborKeyDC: .bytes($0.dc.bytes), Home.cborKeyEpoch: .unsigned($0.epoch),
           Home.cborKeyExpiresAt: .unsigned($0.expiresAt),
           Home.cborKeyAccount: $0.account.map { .unsigned(UInt64($0)) } ?? .null,
         ])
       } ?? .null
-    return CBOR.record([
-      UserProfile.cborKeyTag: .unsigned(BlahTag.profile.rawValue),
-      UserProfile.cborKeyVersion: .unsigned(1), UserProfile.cborKeyKind: .unsigned(kind.rawValue),
-      UserProfile.cborKeyHome: homeValue,
-      UserProfile.cborKeyDomains: .array(
-        domains.map { .record([ProfileDomain.cborKeyName: .text($0.name)]) }),
-    ]).encoded
+    return ProfileFields(domains: content.domains, application: [
+      UserProfile.cborKeyKind: .unsigned(kind.rawValue), UserProfile.cborKeyHome: home,
+    ])
   }
 
-  static func decode(_ data: [UInt8], kind: ProfileKind) throws(BlahError)
-    -> (Home?, [ProfileDomain])
-  {
+  static func decode(_ fields: ProfileFields, kind: ProfileKind) throws(BlahError) -> HostedContent {
     let e = BlahError.invalidProfile
-    let fields = try CBOR.record(
-      data, tag: .profile, requiredKeys: UserProfile.cborKeyTag..<(UserProfile.cborKeyDomains + 1),
-      error: e)
-    guard fields[UserProfile.cborKeyKind]! == .unsigned(kind.rawValue) else { throw e }
+    guard try self.kind(of: fields) == kind, let value = fields.application[UserProfile.cborKeyHome]
+    else { throw e }
     var home: Home?
-    if fields[UserProfile.cborKeyHome]! != .null {
-      let h = try fields[UserProfile.cborKeyHome]!.record(
-        e, requiredKeys: Home.cborKeyDC..<(Home.cborKeyAccount + 1))
+    if value != .null {
+      let h = try value.record(e, requiredKeys: Home.cborKeyDC..<(Home.cborKeyAccount + 1))
       home = Home(
         dc: try h[Home.cborKeyDC]!.digest(e), epoch: try h[Home.cborKeyEpoch]!.unsigned(e),
         expiresAt: try h[Home.cborKeyExpiresAt]!.unsigned(e),
         account: h[Home.cborKeyAccount]! == .null
           ? nil : Int64(exactly: try h[Home.cborKeyAccount]!.unsigned(e)) ?? 0)
     }
-    var domains: [ProfileDomain] = []
-    for entry in try fields[UserProfile.cborKeyDomains]!.array(e) {
-      let domain = try entry.record(
-        e, requiredKeys: ProfileDomain.cborKeyName..<(ProfileDomain.cborKeyName + 1))
-      domains.append(try ProfileDomain(domain[ProfileDomain.cborKeyName]!.text(e)))
-    }
-    try validate(kind: kind, home: home, domains: domains)
-    return (home, domains)
+    let content = HostedContent(home: home, domains: fields.domains)
+    try validate(content, kind: kind)
+    return content
   }
 
-  static func validate(kind: ProfileKind, home: Home?, domains: [ProfileDomain]) throws(BlahError)
-  {
-    if let home {
+  static func validate(_ content: HostedContent, kind: ProfileKind) throws(BlahError) {
+    if let home = content.home {
       let accountLimit: Int64 = switch kind {
       case .user, .bot, .dc: 9_007_199_254_740_991
       case .channel: 997_852_516_352
@@ -308,13 +293,15 @@ enum HostedRecord {
         home.account.map({ $0 > 0 && $0 < accountLimit }) ?? true
       else { throw .invalidProfile }
     }
-    guard domains.count <= maximumDomains, Set(domains.map { $0.name }).count == domains.count,
-      domains.allSatisfy({ DomainName.isValid($0.name) })
-    else { throw .invalidName }
-    switch kind {
-    case .stickerSet:
-      guard domains.count == 1 else { throw .invalidName }
-    default: break
+    let domainCount = kind == .stickerSet
+      ? StickerSetProfile.domainCount : UserProfile.domainCount
+    try validate(domains: content.domains, count: domainCount)
+  }
+
+  /// Distinct domains, as many as the kind lists.
+  static func validate(domains: [DomainName], count: ClosedRange<Int>) throws(BlahError) {
+    guard count.contains(domains.count), Set(domains).count == domains.count else {
+      throw .invalidName
     }
   }
 }
