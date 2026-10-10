@@ -3,6 +3,7 @@ import {encode, decode} from './cbor.js';
 import {createDiem} from '../dist/diem.js';
 import {exerciseProfiles} from './profiles.js';
 import {exerciseKeyFiles} from './key-files.js';
+import {exercisePaperKeys} from './paper-keys.js';
 
 function check(condition, message) { if(!condition) throw new Error(message); }
 async function rejects(action) {
@@ -107,6 +108,7 @@ export async function run() {
   const corrupt = [...removed.profile]; corrupt[corrupt.length - 1] ^= 1;
   await rejects(() => perform('inspect', {}, corrupt));
   await exerciseProfiles({diem, backend, check, rejects, base, alice, first, second});
+  await exercisePaperKeys({diem, check, rejects, base, alice, first});
   check(!('blahCall' in globalThis) && !('blahCrypto' in globalThis), 'Global bridge callbacks leaked');
   return {keyFile, realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};
 }

@@ -23,6 +23,12 @@ export interface DiemClient {
     create(password: string): Promise<KeyFileSession>;
     unlock(file: Uint8Array | number[], password: string): Promise<{session: KeyFileSession; contents: KeyFileSecret}>;
   };
+  paperKeys: {
+    /** A new paper device key. Show its phrase once, then certify `device` with `addDevice`. */
+    generate(): Promise<PaperKey>;
+    /** Rejects unknown words, a wrong word count or a failed checksum with `invalidEncoding`. */
+    restore(phrase: string): Promise<PaperKey>;
+  };
   generateSigningKey(): Promise<SigningKey>;
   identityOperation(input: IdentityInput, crypto: CryptoBackend): Promise<IdentityResult>;
   dcSetup(input: DCSetupRequest, crypto: CryptoBackend): Promise<DCSetupResult>;
@@ -30,6 +36,8 @@ export interface DiemClient {
   inspectChallenge(kind: string, encoding: number[] | Uint8Array): ChallengeInfo;
 }
 export interface SigningKey {privateKey: string; publicKey: string}
+/** The canonical lowercase words, single-spaced, the Ed25519 device key they derive and its encoded Diem public key. */
+export interface PaperKey {phrase: string; key: SigningKey; device: number[]}
 export interface KeyFileSecret {
   domain: string;
   profile: string;

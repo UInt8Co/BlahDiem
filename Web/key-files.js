@@ -30,6 +30,11 @@ async function restore(raw) {
   finally { pkcs8.fill(0); }
 }
 
+async function restorePublicKey(raw) {
+  const jwk = await crypto.subtle.exportKey('jwk', await restore(raw));
+  return decode(jwk.x.replace(/-/g, '+').replace(/_/g, '/') + '=');
+}
+
 async function signingKey(raw) {
   const key = await restore(raw);
   const jwk = await crypto.subtle.exportKey('jwk', key);
@@ -55,6 +60,26 @@ export async function generateSigningKey() {
   finally { pkcs8.fill(0); }
 }
 
+/** Diem owns paper-key words and derivation; WebCrypto holds the derived Ed25519 key. */
+export function paperKeys(exports) {
+  const backend = {restorePublicKey};
+  async function result(value) {
+    try { return {phrase: value.phrase, key: await signingKey(value.seed), device: value.device}; }
+    finally { value.seed.fill(0); }
+  }
+  return {
+    async generate() {
+      const entropy = crypto.getRandomValues(new Uint8Array(32));
+      try { return await result(await exports.newPaperKey(Array.from(entropy), backend)); }
+      finally { entropy.fill(0); }
+    },
+    async restore(phrase) {
+      if(typeof phrase !== 'string' || phrase.length > 1024) throw new Error('Enter the paper key words.');
+      return result(await exports.paperKey(phrase, backend));
+    }
+  };
+}
+
 export function keyFiles(exports) {
   const inspect = file => exports.keyFileInfo(fileBytes(file));
   async function create(password, salt = crypto.getRandomValues(new Uint8Array(16))) {
@@ -73,10 +98,7 @@ export function keyFiles(exports) {
     const requireKey = () => { if(!pair) throw new Error('Unlock your identity to continue.'); return pair; };
     const backend = {
       encryptionPublicKey: () => { requireKey(); return publicKey; },
-      restorePublicKey: async raw => {
-        const jwk = await crypto.subtle.exportKey('jwk', await restore(raw));
-        return decode(jwk.x.replace(/-/g, '+').replace(/_/g, '/') + '=');
-      },
+      restorePublicKey,
       signRestored: async(raw, message) => bytes(await crypto.subtle.sign('Ed25519', await restore(raw), bytes(message))),
       verify: async(key, message, signature) => {
         const algorithm = key.length === 32 ? 'Ed25519' : {name: 'ECDSA', namedCurve: 'P-256'};

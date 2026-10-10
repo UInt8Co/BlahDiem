@@ -69,7 +69,8 @@ for(const name of ['diem.js', 'diem.wasm', 'diem.d.ts', 'bridge-js.d.ts', 'packa
 }
 // Includes the key-file codec, HPKE and Noble's P-256 public-point derivation
 // for complete private-key imports on Safari (about 136 KB of JS in total).
-if(files['diem.wasm'].bytes > 450_000 || files['diem.wasm.br'].bytes > 165_000 || files['diem.js'].bytes > 140_000) {
+// Paper keys add Diem's 13 KB BIP 39 word list to the WASM.
+if(files['diem.wasm'].bytes > 465_000 || files['diem.wasm.br'].bytes > 165_000 || files['diem.js'].bytes > 140_000) {
   throw new Error('Web artifact exceeds its size budget; inspect before releasing.');
 }
 const source = {repository: 'https://github.com/UInt8Co/BlahDiem',

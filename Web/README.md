@@ -81,6 +81,15 @@ The bundled `@hpke/core` implementation uses WebCrypto; `@noble/curves` supplies
 P-256 public point for Safari-compatible private-key imports. No external scripts are requested.
 Downloads use `.cbor` and `application/cbor`. JSON files are rejected.
 
+## Paper device keys
+
+`paperKeys.generate()` returns a new paper device key: its 24-word `phrase`, the derived
+Ed25519 signing `key` and the encoded Diem `device` public key. Show the phrase once and
+certify `device` with `addDevice`. `paperKeys.restore(phrase)` ignores case and spacing and
+rejects unknown words, a wrong word count or a failed checksum. A restored paper is an
+ordinary device: it signs in only while the identity's current profile lists it and cannot
+manage devices. Diem's `PaperDeviceKey` owns the words and derivation.
+
 ## Vendoring a release
 
 Each successful `main` push publishes a GitHub release named `YYYYMMDD-<sha4>`.

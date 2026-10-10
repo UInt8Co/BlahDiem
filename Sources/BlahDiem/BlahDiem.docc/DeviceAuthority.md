@@ -31,7 +31,9 @@ software keys and verifies Ed25519 and P-256 profiles.
 ``KeyFile`` is the common canonical-CBOR storage and export format for browser custody,
 DC setup and native file recovery. ``KeyFileContents`` holds the signed profile, one
 identity key, one listed device key, or both, and an encrypted application metadata map.
-The key roles remain distinct: a device-only file grants no recovery authority. Native
+The key roles remain distinct: a device-only file grants no recovery authority. A Diem
+`PaperDeviceKey` is a listed software device written as 24 words; custody that keeps it
+uses a device-only file. Native
 hardware device keys stay on their device; native recovery exports the software identity
 key and enrolls a new hardware device when restored.
 
