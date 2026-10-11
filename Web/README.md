@@ -50,6 +50,22 @@ itself as account 777000. DC creation uses `dcSetup`; changing its account or ho
   It returns the identity, profile version/digest, exact client endpoints and transport
   public key. The caller owns HTTPS fetching, transport selection, identity pinning and
   persistent version floors; this operation only requires the `verify` crypto callback.
+- `verifyProfile(encoding, now, crypto)` verifies a stored public `user`, `channel`,
+  `bot`, `stickerSet` or `dc` profile without domain binding or private keys; only
+  `crypto.verify` is required. Diem validates the record, every device certificate
+  and the content signature at the profile's `notBefore`; BlahDiem validates its kind
+  and application fields. Invalid signatures or structure reject with the native error
+  code (for example `invalidSignature` or `invalidProfile`).
+  The returned `ProfileInfo` contains `id` (lowercase hex), `kind`, `generation`,
+  `revision`, `notBefore`, `expiresAt`, `lapsed`, ordered `domains`, and nullable
+  `home: {dc, account, epoch}`. Home `dc` is the DC identity/federation key ID in hex;
+  `account` is null until allocated. All returned integers are decimal strings.
+  `lapsed` is true when `now < notBefore` or `now >= expiresAt`; such profiles still
+  verify because the server returns its latest stored profile even after expiry.
+  A DC's home is itself, account `777000`, epoch `1`. Hosted profiles may have no home.
+  This is a stateless check: callers bind the result to the expected identity and
+  retain monotonic generation/revision floors. Listed domains are signed claims,
+  not proof of current domain control; `lapsed` describes the profile window only.
 - `inspectChallenge` decodes `invocation`, `login`, `oauthConsent`, `accountLink`
   and `dcAdmin` challenges into fields for session checks or consent UI. It does
   not authenticate the issuing server or grant approval.
@@ -166,7 +182,7 @@ different cryptographic backend with intermittent Ed25519 key-generation failure
 macOS exercises Safari's native backend and private-key import restrictions.
 
 `BLAH_SWIFT`, `WASM_OPT` and `BLAH_BROWSER_EXECUTABLE` select installed tools (the browser
-override applies to Chromium).
+override applies to each requested browser; select one engine when overriding).
 Build output is in `Web/dist/`. The build pins dependencies, generates BridgeJS
 bindings, minimizes the Embedded Swift binary and enforces artifact size limits.
 Tests check the RFC 9180 derivation vector and run real WebCrypto operations in Window,

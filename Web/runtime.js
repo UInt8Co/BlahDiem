@@ -70,6 +70,12 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
         profileLifetime: input.profileLifetime ?? 90 * 86400,
         deviceLifetime: input.deviceLifetime ?? 90 * 86400}, backend(crypto));
     },
+    async verifyProfile(encoding, now, crypto) {
+      if(!validTime(now) || typeof crypto?.verify !== 'function') {
+        throw new TypeError('Invalid profile verification request');
+      }
+      return exports.verifyProfile(bytes(encoding, 'profile'), now, crypto);
+    },
     async verifyDCProfile(domain, encoding, now, crypto) {
       if(typeof domain !== 'string' || domain.length > 253 || !validTime(now) || typeof crypto?.verify !== 'function') {
         throw new TypeError('Invalid DC discovery request');

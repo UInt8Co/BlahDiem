@@ -189,6 +189,16 @@ public enum AnyBlahProfile: BlahProfile {
   case stickerSet(StickerSetProfile)
   case dc(DCProfile)
 
+  /// Decodes a public Blah profile and verifies its certificates and signature at
+  /// the start of its signed validity window, including profiles that have lapsed.
+  /// Check `validity.contains(now)` separately before treating it as current.
+  /// Callers own identity pinning and persistent generation/revision floors.
+  @inline(__always)
+  public init(verifying encoding: [UInt8], using backend: some CryptoBackend) async throws {
+    try self.init(encoding: encoding)
+    try await verify(using: backend, at: validity.notBefore)
+  }
+
   public init(record: ProfileRecord) throws(BlahError) {
     switch try HostedRecord.kind(of: record.fields) {
     case .user: self = .user(try UserProfile(record: record))

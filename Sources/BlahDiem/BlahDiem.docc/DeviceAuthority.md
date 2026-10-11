@@ -60,6 +60,12 @@ followed by that kind's fields. Each type decodes only its own kind;
 ``AnyBlahProfile`` decodes any. A type's `Content` is what the publisher edits, and
 `BasicIdentity` signs it as the next revision.
 
+Use ``AnyBlahProfile/init(verifying:using:)`` for public profiles returned by a DC.
+It decodes Blah's fields and calls Diem's verification at the profile's `notBefore`,
+so a stored profile can still verify after expiry. Check `profile.validity.contains(now)`
+to determine whether its window is current. This performs no domain binding; callers
+pin the expected identity and retain monotonic generation/revision floors.
+
 A hosted identity names its ``Home``: the DC's identity ID, the epoch of the hosting
 and, once allocated, the account number. A later epoch is a new account. Every domain
 of a user, bot or channel profile is a public username candidate; a sticker set has

@@ -17,6 +17,19 @@ export interface CryptoBackend {
   sign(role: 'identity' | 'device', bytes: number[]): Promise<Uint8Array>;
   verify(key: number[], data: number[], signature: number[]): Promise<boolean>;
 }
+/** Verified public facts. All integers are exact decimal strings; IDs are lowercase hex. */
+export interface ProfileInfo {
+  id: string;
+  kind: 'user' | 'channel' | 'bot' | 'stickerSet' | 'dc';
+  generation: string;
+  revision: string;
+  notBefore: string;
+  expiresAt: string;
+  /** True when now < notBefore or now >= expiresAt. Signatures still verify. */
+  lapsed: boolean;
+  domains: string[];
+  home: {dc: string; account: string | null; epoch: string} | null;
+}
 export interface DiemClient {
   keyFiles: {
     inspect(file: Uint8Array | number[]): {id: string; salt: number[]};
@@ -33,6 +46,9 @@ export interface DiemClient {
   identityOperation(input: IdentityInput, crypto: CryptoBackend): Promise<IdentityResult>;
   dcSetup(input: DCSetupRequest, crypto: CryptoBackend): Promise<DCSetupResult>;
   verifyDCProfile(domain: string, encoding: number[] | Uint8Array, now: number, crypto: Pick<CryptoBackend, 'verify'>): Promise<DCDiscoveryResult>;
+  /** Verifies stored public profiles, including lapsed ones, without domain binding.
+   * Callers own identity pinning and persistent generation/revision floors. */
+  verifyProfile(encoding: number[] | Uint8Array, now: number, crypto: Pick<CryptoBackend, 'verify'>): Promise<ProfileInfo>;
   inspectChallenge(kind: string, encoding: number[] | Uint8Array): ChallengeInfo;
 }
 export interface SigningKey {privateKey: string; publicKey: string}

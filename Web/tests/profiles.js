@@ -9,6 +9,24 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const content = profile => decode(decode(decode(profile)[4])[0]);
   // Profile domains (9) and application fields (16 and up), as signed in the content.
   const fields = profile => Object.fromEntries(Object.entries(content(profile)).filter(([key]) => key == 9 || key >= 16));
+  const publicCrypto = {verify: alice.verify};
+  const publicInfo = (profile, now = base.now) => diem.verifyProfile(profile, now, publicCrypto);
+  const rejectsWith = async(action, message) => {
+    try { await action(); } catch(error) {
+      check(String(error).includes(message), `Expected ${message}, got ${error}`);
+      return;
+    }
+    throw new Error(`Expected ${message} rejection`);
+  };
+  // Independently re-sign fixtures to distinguish structural checks from signature checks.
+  const resign = async(profile, signer, change) => {
+    const envelope = decode(profile), signed = decode(envelope[4]), fields = decode(signed[0]);
+    change(fields);
+    signed[0] = bytes(encode(fields));
+    signed[1] = await signer.sign('device', signed[0]);
+    envelope[4] = bytes(encode(signed));
+    return encode(envelope);
+  };
   const verify = async(result, signer, statement) => {
     const {0: message, 1: signature} = decode(result.proof);
     check(await signer.verify(signer.publicKey('device'), message, signature), 'Proof signature');
@@ -31,11 +49,55 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     await rejects(() => perform('inspect', {kind: kind === 'user' ? 'channel' : 'user'}));
     const numbered = await perform('account', {account});
     check(numbered.account === account, `${kind} account precision`);
+    const publicProfile = await publicInfo(bytes(numbered.profile));
+    check(publicProfile.id === created.id && publicProfile.kind === kind, `${kind} verified public identity`);
+    check(publicProfile.generation === String(content(numbered.profile)[3]) &&
+      publicProfile.revision === String(content(numbered.profile)[5]), `${kind} public version`);
+    check(publicProfile.notBefore === String(numbered.notBefore) && publicProfile.expiresAt === String(numbered.expiresAt) && !publicProfile.lapsed,
+      `${kind} public validity`);
+    check(publicProfile.domains.length === 1 && publicProfile.domains[0] === domain &&
+      publicProfile.home.dc === Array.from(dc, v => v.toString(16).padStart(2, '0')).join('') &&
+      publicProfile.home.account === account && publicProfile.home.epoch === '1', `${kind} public home and domains`);
+    check((await publicInfo(created.profile)).home.account === null, `${kind} unallocated account`);
+    for(const [now, lapsed] of [[numbered.notBefore - 1, true], [numbered.notBefore, false],
+      [numbered.expiresAt - 1, false], [numbered.expiresAt, true], [numbered.expiresAt + 1, true]]) {
+      check((await publicInfo(numbered.profile, now)).lapsed === lapsed, `${kind} validity boundary ${now}`);
+    }
+    const badSignature = decode(numbered.profile), signed = decode(badSignature[4]);
+    signed[1][0] ^= 1; badSignature[4] = bytes(encode(signed));
+    await rejectsWith(() => publicInfo(encode(badSignature)), 'invalidSignature');
+    const badCertificate = decode(numbered.profile), certificate = decode(badCertificate[3][0]);
+    certificate[1][0] ^= 1; badCertificate[3][0] = bytes(encode(certificate));
+    await rejectsWith(() => publicInfo(encode(badCertificate)), 'invalidSignature');
+    const invalidKind = await resign(numbered.profile, signer, fields => { fields[16] = 99; });
+    await rejectsWith(() => publicInfo(invalidKind), 'invalidProfile');
+    if(kind === 'user') {
+      const domains = ['z.example.org', domain, 'a.example.org'];
+      const ordered = await perform('domains', {domains}, numbered.profile);
+      check(JSON.stringify((await publicInfo(ordered.profile)).domains) === JSON.stringify(domains), 'Public domain order');
+      const noHome = await resign(numbered.profile, signer, fields => { fields[17] = null; });
+      check((await publicInfo(noHome)).home === null, 'Absent public home');
+      const bigEpoch = await resign(numbered.profile, signer, fields => { fields[17][1] = 9007199254740993n; });
+      check((await publicInfo(bigEpoch)).home.epoch === '9007199254740993', 'Public epoch precision');
+      for(const change of [fields => { fields[5] = 0; }, fields => { fields[6] = new Uint8Array(); },
+        fields => { fields[3] = 2; }, fields => { fields[8] = numbered.expiresAt + 1; }]) {
+        const invalid = await resign(numbered.profile, signer, change);
+        await rejects(() => publicInfo(invalid));
+      }
+      const invalidHome = await resign(numbered.profile, signer, fields => { fields[17][1] = 0; });
+      await rejectsWith(() => publicInfo(invalidHome), 'invalidProfile');
+    }
     const renewed = await perform('renew', {now: base.now + 10}, numbered.profile);
     check(renewed.id === created.id && renewed.expiresAt > created.expiresAt, `${kind} renewal`);
     const added = await perform('addDevice', {device: second.devices[0].key}, renewed.profile);
     const removed = await perform('removeDevice', {device: fromHex(second.devices[0].id)}, added.profile);
     check(added.devices.length === 2 && removed.devices.length === 1, `${kind} devices`);
+    const addedInfo = await publicInfo(added.profile), removedInfo = await publicInfo(removed.profile);
+    check(BigInt(removedInfo.generation) > BigInt(addedInfo.generation) &&
+      BigInt(removedInfo.revision) > BigInt(addedInfo.revision), `${kind} public version after revocation`);
+    const untrustedDevice = decode(added.profile), otherCertificate = decode(untrustedDevice[3][1]);
+    otherCertificate[1][0] ^= 1; untrustedDevice[3][1] = bytes(encode(otherCertificate));
+    await rejectsWith(() => publicInfo(encode(untrustedDevice)), 'invalidSignature');
     await rejects(() => perform('account', {account: kind === 'channel' ? '997852516352' : '9223372036854775807'}));
     const invocation = encode({0: 4, 1: 1, 2: domain, 3: nonce, 4: expires, 5: dc, 6: keyID, 7: sessionID});
     const query = bytes([1, 2, 3, 4]);
@@ -110,6 +172,24 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   check(created.expiresAt === base.now + 90 * 86400, 'Default 90-day DC profile');
   check(created.devices.every(device => device.notBefore === base.now && device.expiresAt === base.now + 90 * 86400), 'Default 90-day DC certificate');
   const discovered = await diem.verifyDCProfile('dc.example.org', created.profile, base.now, {verify: alice.verify});
+  const publicDC = await publicInfo(created.profile);
+  check(publicDC.kind === 'dc' && publicDC.id === created.id && publicDC.home.dc === created.id &&
+    publicDC.home.account === '777000' && publicDC.home.epoch === '1', 'Public DC self-hosting');
+  check((await publicInfo(created.profile, created.expiresAt)).lapsed, 'Lapsed public DC verifies');
+  await rejectsWith(() => diem.verifyProfile(created.profile, base.now, {verify: async() => false}), 'invalidSignature');
+  for(const now of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    await rejectsWith(() => publicInfo(created.profile, now), 'Invalid profile verification request');
+  }
+  for(const profile of [[], [256], [-1], [1.5], new Array(10), new Uint8Array(100001)]) {
+    await rejects(() => publicInfo(profile));
+  }
+  await rejectsWith(() => diem.verifyProfile(created.profile, base.now, {}), 'Invalid profile verification request');
+  // BridgeJS preserves backend exceptions, whose stack formatting differs by browser.
+  await rejects(() => diem.verifyProfile(created.profile, base.now, {verify: async() => { throw new Error('Verifier refused'); }}));
+  const concurrent = await Promise.allSettled([publicInfo(created.profile),
+    diem.verifyProfile(first.profile, base.now, {verify: async() => false}), publicInfo(first.profile)]);
+  check(concurrent[0].status === 'fulfilled' && concurrent[1].status === 'rejected' &&
+    concurrent[2].status === 'fulfilled', 'Public verification callbacks stay per operation');
   check(discovered.id === created.id && discovered.namespaceGeneration === '1', 'Verified DC identity and namespace');
   check(discovered.endpoints[0].path === '/apiws' && discovered.endpoints[0].transport === 'webSocket', 'Verified DC endpoints');
   for(const [domain, profile, now] of [

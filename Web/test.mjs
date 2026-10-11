@@ -25,8 +25,8 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 let browser;
 try {
   for(const engine of engines) {
-    browser = await engine.launch({headless: true,
-      ...(engine === chromium ? {executablePath: process.env.BLAH_BROWSER_EXECUTABLE, args: ['--no-sandbox']} : {})});
+    browser = await engine.launch({headless: true, executablePath: process.env.BLAH_BROWSER_EXECUTABLE,
+      ...(engine === chromium ? {args: ['--no-sandbox']} : {})});
     const page = await browser.newPage();
     page.on('pageerror', error => console.error(error));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -48,7 +48,7 @@ try {
       }), shared);
       assert.equal(result.realm, 'worker');
     }
-    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: hosted identity kinds, all challenge/proof kinds, DC setup/recovery, Safari key imports, HPKE key files and native interoperability, concurrent signers, devices and rejection.`);
+    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, Safari key imports, HPKE key files and native interoperability, concurrent signers, devices and rejection.`);
     await browser.close(); browser = undefined;
   }
 } finally {

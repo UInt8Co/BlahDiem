@@ -104,6 +104,9 @@ export async function run() {
   envelope[4] = new Uint8Array(encode({0: message, 1: signature}));
   const inspected = await perform('inspect', {}, encode(envelope));
   check(inspected.devices.length === 2, 'Secure Enclave profile verification');
+  const publicNative = await diem.verifyProfile(encode(envelope), base.now, {verify: alice.verify});
+  check(publicNative.id === native.id && publicNative.kind === 'user' && !publicNative.lapsed,
+    'Public P-256 profile verification');
   // The optimized build must still reject tampered canonical profiles.
   const corrupt = [...removed.profile]; corrupt[corrupt.length - 1] ^= 1;
   await rejects(() => perform('inspect', {}, corrupt));
