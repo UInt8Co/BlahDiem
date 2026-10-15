@@ -86,7 +86,23 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
       }
       const invalidHome = await resign(numbered.profile, signer, fields => { fields[17][1] = 0; });
       await rejectsWith(() => publicInfo(invalidHome), 'invalidProfile');
+      // Custody works on any DC; acting as or numbering an account needs its home.
+      const otherDC = Array(32).fill(8), otherHex = '08'.repeat(32);
+      const elsewhere = await perform('inspect', {dc: otherDC}, numbered.profile);
+      check(elsewhere.id === created.id && elsewhere.namespace === '' && elsewhere.account === account &&
+        equal(elsewhere.profile, numbered.profile), 'Inspect away from home');
+      check(numbered.namespace !== '', 'Namespace at home');
+      const renewedElsewhere = await perform('renew', {dc: otherDC, now: base.now + 5}, numbered.profile);
+      check((await publicInfo(renewedElsewhere.profile)).home.account === account, 'Renewal away from home keeps the hosting');
+      await rejectsWith(() => perform('account', {dc: otherDC, account}, numbered.profile), 'wrongHome');
+      await rejectsWith(() => perform('home', {}, numbered.profile), 'wrongHome');
+      const moved = await perform('home', {dc: otherDC}, numbered.profile);
+      const movedInfo = await publicInfo(moved.profile);
+      check(moved.account === '' && moved.namespace !== '' && moved.namespace !== numbered.namespace &&
+        movedInfo.home.dc === otherHex && movedInfo.home.epoch === '2' && movedInfo.home.account === null, 'Home change starts a new hosting');
+      check((await perform('inspect', {}, moved.profile)).namespace === '', 'Former home has no namespace');
     }
+    if(kind !== 'user') await rejectsWith(() => perform('home', {dc: Array(32).fill(8)}), 'wrongHome');
     const renewed = await perform('renew', {now: base.now + 10}, numbered.profile);
     check(renewed.id === created.id && renewed.expiresAt > created.expiresAt, `${kind} renewal`);
     const added = await perform('addDevice', {device: second.devices[0].key}, renewed.profile);
@@ -168,7 +184,10 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const dcRenewed = await operateDC('renew', {now: base.now + 10});
   check(content(dcRenewed.profile)[16] === 5 && dcRenewed.account === '777000', 'User renewal preserves DC kind');
   await rejects(() => operateDC('account', {account: '1000000'}));
-  await rejects(() => operateDC('inspect', {dc: base.dc}));
+  check((await operateDC('inspect', {dc: base.dc})).namespace === '', 'DC inspected away from itself');
+  await rejects(() => operateDC('home', {dc: base.dc}));
+  await rejects(() => operateDC('prove', {dc: base.dc, challengeKind: 'invocation', challenge: dcInvocation,
+    approvedChallenge: dcInvocation, expiresAt: expires, keyID: String(keyID), sessionID: String(sessionID), query: dcQuery}));
   check(created.expiresAt === base.now + 90 * 86400, 'Default 90-day DC profile');
   check(created.devices.every(device => device.notBefore === base.now && device.expiresAt === base.now + 90 * 86400), 'Default 90-day DC certificate');
   const discovered = await diem.verifyDCProfile('dc.example.org', created.profile, base.now, {verify: alice.verify});

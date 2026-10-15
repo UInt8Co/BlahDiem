@@ -21,12 +21,19 @@ Each asynchronous operation retains its own crypto backend.
 
 - `identityOperation` manages hosted `user`, `channel`, `bot` and `stickerSet`
   identities. Specify `kind` and an operation: `create`, `inspect`, `renew`,
-  `account`, `domains`, `addDevice`, `removeDevice` or `prove`. Native profile rules validate
+  `account`, `home`, `domains`, `addDevice`, `removeDevice` or `prove`. Native profile rules validate
   names, account numbers, homes and devices. `profileLifetime` and `deviceLifetime`
   are positive integer seconds, defaulting to 180 days. Profile lifetime must not
   exceed device lifetime. Results include ordered profile domains and profile/device validity intervals;
   callers own renewal scheduling and publication. Renewal also extends the home
   delegation to the device expiry.
+`dc` names the DC the caller is acting at. Inspection, renewal, domain and device changes
+work whichever DC hosts the identity; `namespace` is empty unless `dc` is its home. `prove`
+and `account` require `dc` to be the home and otherwise reject with `wrongHome`. Read the
+current home from `verifyProfile`.
+For a user, `home` moves the identity to `dc`: a later home epoch with no account, which
+the destination allocates at signup. Whichever DC receives that profile ends the old
+hosting's account. Moving to the current home, or a DC profile, is refused.
 For a user, `domains` replaces the ordered domain list. Every domain is a username
 candidate, and at least one domain remains. The caller republishes the signed revision
 at every listed domain before requesting a DC profile check. Activation and ordering

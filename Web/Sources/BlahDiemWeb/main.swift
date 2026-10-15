@@ -172,19 +172,28 @@ JavaScriptEventLoop.installGlobalExecutor()
           profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       }
       var hosted = try HostedProfile(identity.profile, kind: kind)
-      guard let home = hosted.home, home.dc == dc, hosted.domains.contains(where: { $0.name == domain })
+      guard let home = hosted.home, hosted.domains.contains(where: { $0.name == domain })
       else { throw BlahError.wrongHome }
+      // Custody works wherever the identity is hosted; only acting as this DC's account,
+      // or numbering it, requires `dc` to be its home.
+      let atHome = home.dc == dc
       var proof: [UInt8] = []
       switch input.operation {
       case "renew":
         hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + deviceLifetime, account: home.account)
         try await identity.renew()
         try await identity.update(hosted.content)
+      case "home":
+        // A home change is a new hosting: a later epoch at `dc`, which allocates its own account.
+        guard kind == "user", !atHome, home.epoch < UInt64.max else { throw BlahError.wrongHome }
+        hosted.home = Home(dc: dc, epoch: home.epoch + 1, expiresAt: backend.now + deviceLifetime)
+        try await identity.update(hosted.content)
       case "domains":
         guard kind == "user", let names = input.domains, !names.isEmpty else { throw BlahError.invalidName }
         hosted.domains = try names.map { try DomainName($0) }
         try await identity.update(hosted.content)
       case "account":
+        guard atHome else { throw BlahError.wrongHome }
         guard let account = Int64(input.account ?? ""), account > 0,
           home.account == nil || home.account == account else { throw BlahError.wrongNamespace }
         hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: home.expiresAt, account: account)
@@ -194,13 +203,18 @@ JavaScriptEventLoop.installGlobalExecutor()
       case "addDevice":
         try await identity.add(DevicePublicKey(PublicKey(encoding: input.device ?? [])))
       case "prove":
+        guard atHome else { throw BlahError.wrongHome }
         proof = try await proveChallenge(input, identity: identity, home: home)
       case "create", "inspect": break
       default: throw BlahError.invalidProfile
       }
-      let namespace = try ClientNamespace(profile: identity.profile,
-        dc: DCAddress(domain: DomainName(input.dcDomain), id: dc), generation: generation)
-      return IdentityResult(id: identity.id.description, namespace: namespace.identifier, domains: hosted.domains.map { $0.name },
+      // An identity hosted elsewhere has no namespace at `dc`.
+      var namespace = ""
+      if hosted.home?.dc == dc {
+        namespace = try ClientNamespace(profile: identity.profile,
+          dc: DCAddress(domain: DomainName(input.dcDomain), id: dc), generation: generation).identifier
+      }
+      return IdentityResult(id: identity.id.description, namespace: namespace, domains: hosted.domains.map { $0.name },
         profile: identity.profile.encoding, proof: proof,
         account: hosted.home?.account.map(String.init) ?? "",
         notBefore: Double(identity.profile.validity.notBefore),
