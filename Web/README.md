@@ -4,7 +4,7 @@ The WASM library runs BlahDiem's canonical profile and proof rules in windows,
 dedicated workers and shared workers. BridgeJS generates the JavaScript ABI and
 TypeScript declarations. WebCrypto supplies Ed25519 signing and Ed25519/P-256 verification;
 BlahDiem owns password-protected CBOR key files and key serialization. Applications own
-storage, unlock lifetimes, profile hosting and user consent.
+storage, unlock lifetimes, publication and user consent.
 
 ```js
 import {createDiem} from './diem.js';
@@ -34,7 +34,8 @@ current home from `verifyProfile`.
 For a user, `home` moves the identity to `dc`: a later home epoch with no account, which
 the destination allocates at signup. Whichever DC receives that profile ends the old
 hosting's account. Moving to the current home, or a DC profile, is refused.
-For a user, `domains` replaces the ordered domain list. Every domain is a username
+`domains` replaces the ordered domain list under each kind’s native rules (a sticker
+set keeps exactly one). Every domain is a username
 candidate, and at least one domain remains. The caller republishes the signed revision
 at every listed domain before requesting a DC profile check. Activation and ordering
 of verified names are account settings.
@@ -84,6 +85,33 @@ current `keyID` and `sessionID`; invocation proofs bind the exact `query` bytes.
 The library checks the home, expiry, identity/device binding and native statement
 rules before signing. Proofs need only the device signer; identity keys certify
 and manage devices. Invalid requests reject without replacing another call's signer.
+
+## Profile hosting
+
+`hosting.policy(domain, transport?)` reads a host’s limits and PoW policy.
+`hosting.plan(domain, labels, identity, transport?)` returns `invalid`, `taken`, `held`
+or `needsProof` names, with the difficulty and puzzle for new names. Pass the lowercase
+hex identity ID. Held names are unverified discovery hints; publication decides ownership.
+
+`hosting.solve(puzzle, {signal, start, stride, onProgress}?)` searches eight-byte counters
+and yields between batches. `onProgress` reports cumulative attempts; difficulty describes
+expected work, not a completion time. Applications can inject their own solver or distribute
+counter strides among workers. Cancellation rejects with `type: 'cancelled'`.
+
+Use `identityOperation`’s `create` or `domains` to sign the desired names, then persist
+that revision before `hosting.publish(domain, profile, {proofs, solver, transport, via}?)`.
+Proofs map labels to nonce bytes and are sent as given for the host to check; a solver
+answers one `proof-required` refusal, its nonces checked natively, and publication retries once. Publication accepts any Diem profile kind and returns the identity in
+hex, revision as a decimal string and hosted domains in signed order. Retry an unanswered
+PUT with the same saved bytes. `via` selects the name host, including a formerly held name
+for a full release; a completed full release may not be repeatable at that old name.
+
+`hosting.fetchTransport({signal, timeout}?)` defaults to a 15-second timeout, refuses
+redirects, omits credentials and referrers, disables caching and caps streamed responses at
+262,144 bytes. Custom transports and solvers return promises; their errors propagate unchanged
+(including `AbortError`). They must settle on cancellation so Swift can finish the operation.
+Host refusals have `type: 'hostingProblem'`, wire `code`, `status`, `detail`, `labels` and
+nullable `retryAfter` seconds. Client failures have a stable `type`; see `diem.d.ts`.
 
 ## Key files
 

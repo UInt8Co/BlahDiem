@@ -8,11 +8,12 @@ let package = Package(
     .library(name: "BlahDiem", targets: ["BlahDiem"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/UInt8Co/diem.git", revision: "bc15912edb2bc770389bc8981e749320776b6cf1"),
+    .package(url: "https://github.com/UInt8Co/diem.git", revision: "5f0017a4f664473e5bdfa985c1707aa4937075d6"),
     .package(url: "https://github.com/apple/swift-docc-plugin", exact: "1.5.0"),
   ],
   targets: [
-    .target(name: "BlahDiem", dependencies: [.product(name: "Diem", package: "diem")]),
+    .target(name: "BlahDiem", dependencies: [.product(name: "Diem", package: "diem"),
+      .product(name: "DiemProfileHostingClient", package: "diem")]),
     .testTarget(
       name: "BlahDiemTests",
       dependencies: ["BlahDiem", .product(name: "DiemSwiftCrypto", package: "diem")]

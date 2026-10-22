@@ -14,8 +14,16 @@ const web = fileURLToPath(new URL('.', import.meta.url));
 const server = createServer(async(req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
+    if(path.startsWith('/hosting/')) {
+      if(path === '/hosting/redirect') { res.writeHead(302, {Location: '/hosting/privacy'}); res.end(); }
+      else if(path === '/hosting/large') { res.writeHead(200, {'Content-Length': '262145'}); res.end(Buffer.alloc(262145)); }
+      else if(path === '/hosting/stream') { res.writeHead(200); res.write(Buffer.alloc(131072)); res.end(Buffer.alloc(131073)); }
+      else if(path === '/hosting/body-hang') { res.writeHead(200); res.write('x'); }
+      else if(path === '/hosting/privacy') res.end(JSON.stringify({cookie: req.headers.cookie, referer: req.headers.referer}));
+      return;
+    }
     if(!/^\/(dist|tests)\/[a-zA-Z0-9.-]+$/.test(path)) {
-      res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>BlahDiem web test</title>'); return;
+      res.setHeader('Content-Type', 'text/html'); res.setHeader('Set-Cookie', 'hosting-test=present; SameSite=Strict'); res.end('<!doctype html><title>BlahDiem web test</title>'); return;
     }
     res.setHeader('Content-Type', path.endsWith('.wasm') ? 'application/wasm' : 'text/javascript');
     res.end(await readFile(web + path));
@@ -48,7 +56,7 @@ try {
       }), shared);
       assert.equal(result.realm, 'worker');
     }
-    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, Safari key imports, HPKE key files and native interoperability, concurrent signers, devices and rejection.`);
+    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: profile hosting, PoW, cancellation and transport bounds, public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, Safari key imports, HPKE key files and native interoperability, concurrent signers, devices and rejection.`);
     await browser.close(); browser = undefined;
   }
 } finally {

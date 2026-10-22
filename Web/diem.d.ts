@@ -30,7 +30,74 @@ export interface ProfileInfo {
   domains: string[];
   home: {dc: string; account: string | null; epoch: string} | null;
 }
+/** One HTTP exchange. The default transport is `hosting.fetchTransport()`. */
+export interface HostingHTTPRequest {method: 'GET' | 'HEAD' | 'PUT'; url: string;
+  headers: Record<string, string>; body: number[] | null}
+export interface HostingHTTPResponse {status: number; headers: Record<string, string>;
+  body: Uint8Array | number[]}
+export type HostingTransport = (request: HostingHTTPRequest) => Promise<HostingHTTPResponse>;
+
+/** A proof-of-work puzzle: find a nonce (1–64 bytes) so that SHA-256(input ‖ nonce) has at
+ * least `requiredBits` leading zero bits. `input` already binds domain, label and identity. */
+export interface HostingPuzzle {label: string; input: number[]; requiredBits: number}
+export type HostingSolver = (puzzle: HostingPuzzle) => Promise<Uint8Array | number[]>;
+
+export interface HostingPolicy {
+  domain: string; labelPattern: string; maxClaimsPerIdentity: number;
+  maxUpdatesPerIdentityPerHour: number; claimGraceAfterExpiry: number;
+  proofOfWork: {algorithm: 'sha256-leading-zero-bits-v1'; baseBits: number;
+    bitsPerShorterCharacter: number; referenceLength: number};
+}
+export interface HostingPlanName {
+  label: string;
+  status: 'invalid' | 'taken' | 'held' | 'needsProof';
+  /** Set for needsProof. 0 means no proof is needed. */
+  requiredBits: number | null;
+  /** Set for needsProof with requiredBits > 0. */
+  puzzle: HostingPuzzle | null;
+}
+export interface HostingPublished {identity: string; revision: string; domains: string[]}
+
+export interface HostingProblemError {
+  type: 'hostingProblem'; code: string; status: number; detail: string;
+  labels: {label: string; reason: string; requiredBits: number | null}[];
+  retryAfter: number | null;
+}
+export interface HostingClientError {
+  type: 'invalidLabel' | 'nameTaken' | 'unsolvable' | 'invalidProof' | 'noHostedName'
+    | 'hostNotListed' | 'domainMismatch' | 'publishedMismatch' | 'invalidResponse'
+    | 'unexpectedStatus' | 'tooLarge' | 'cancelled' | 'unsupportedAlgorithm';
+  /** Present for unexpectedStatus. */
+  status?: number;
+}
+
 export interface DiemClient {
+  hosting: {
+    /** fetch with redirect:'error', credentials:'omit', cache:'no-store',
+     * referrerPolicy:'no-referrer', a timeout (default 15 s) combined with `signal`, and a
+     * streamed 262,144-byte response cap. */
+    fetchTransport(options?: {signal?: AbortSignal; timeout?: number}): HostingTransport;
+    policy(domain: string, transport?: HostingTransport): Promise<HostingPolicy>;
+    /** `identity` is the lowercase hex identity ID (ProfileInfo.id). Ownership of claimed
+     * names is a hint from the name's current profile; the host decides at publication. */
+    plan(domain: string, labels: string[], identity: string,
+      transport?: HostingTransport): Promise<HostingPlanName[]>;
+    /** Built-in single-threaded solver (@noble/hashes SHA-256 with a cloned prefix state,
+     * 8-byte big-endian counters from `start` stepping by `stride`), yielding to the event
+     * loop between batches. Rejects with type 'cancelled' when `signal` aborts.
+     * Also usable as a HostingSolver: `puzzle => hosting.solve(puzzle)`. */
+    solve(puzzle: HostingPuzzle, options?: {signal?: AbortSignal; start?: number;
+      stride?: number; onProgress?: (attempts: number) => void}): Promise<number[]>;
+    /** One PUT of the exact signed profile bytes to `https://<via>.<domain>/.well-known/
+     * diem/profile.cbor` (`via` defaults to the profile's first hosted label), with the
+     * `Diem-Hosting-Proof` header built from `proofs` (label → nonce). With `solver`, a
+     * single proof-required refusal is answered by solving exactly the listed labels and
+     * retrying once; solver nonces are checked natively before they are sent. Sending identical
+     * bytes again succeeds, so callers retry an unanswered PUT with the same bytes. */
+    publish(domain: string, profile: Uint8Array | number[], options?: {via?: string;
+      proofs?: Record<string, number[]>; solver?: HostingSolver;
+      transport?: HostingTransport}): Promise<HostingPublished>;
+  };
   keyFiles: {
     inspect(file: Uint8Array | number[]): {id: string; salt: number[]};
     create(password: string): Promise<KeyFileSession>;

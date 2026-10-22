@@ -31,6 +31,7 @@ let proof = try await identity.prove(loginChallenge)
 - ``StickerSetProfile``
 - ``DCProfile``
 - ``AnyBlahProfile``
+- ``AnyBlahProfile/Content/replacingDomains(_:)``
 - ``HostedContent``
 - ``Home``
 - ``DCAddress``

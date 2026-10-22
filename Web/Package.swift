@@ -5,12 +5,14 @@ let package = Package(
   name: "BlahDiemWeb",
   dependencies: [
     .package(name: "BlahDiem", path: ".."),
+    .package(url: "https://github.com/UInt8Co/diem.git", revision: "5f0017a4f664473e5bdfa985c1707aa4937075d6"),
     .package(url: "https://github.com/swiftwasm/JavaScriptKit.git", revision: "777848dfd70279c34f885c0c2f9e2c3fc3a45698"),
   ],
   targets: [.executableTarget(
     name: "BlahDiemWeb",
     dependencies: [
       .product(name: "BlahDiem", package: "BlahDiem"),
+      .product(name: "DiemProfileHostingClient", package: "diem"),
       .product(name: "JavaScriptKit", package: "JavaScriptKit"),
       .product(name: "JavaScriptEventLoop", package: "JavaScriptKit"),
     ],

@@ -12,6 +12,7 @@ keys and fixed numeric tags. Types expose their field numbers as public static
 keys; arrays contain lists only. The tuple encoding is not accepted. Every profile
 domain is a username candidate.
 
+Name claims use Diem’s profile-hosting client with Blah’s native domain rules.
 See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md).
 Requires Swift 6.4 or later. Run `swift test` to check the contracts. The package is
 licensed under MIT; see [LICENSE](LICENSE).

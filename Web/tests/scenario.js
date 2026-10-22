@@ -1,6 +1,7 @@
 import challenge from './challenge.js';
 import {encode, decode} from './cbor.js';
 import {createDiem} from '../dist/diem.js';
+import {exerciseHosting} from './hosting.js';
 import {exerciseProfiles} from './profiles.js';
 import {exerciseKeyFiles} from './key-files.js';
 import {exercisePaperKeys} from './paper-keys.js';
@@ -110,6 +111,7 @@ export async function run() {
   // The optimized build must still reject tampered canonical profiles.
   const corrupt = [...removed.profile]; corrupt[corrupt.length - 1] ^= 1;
   await rejects(() => perform('inspect', {}, corrupt));
+  await exerciseHosting({diem, check, base, alice, bob, first});
   await exerciseProfiles({diem, backend, check, rejects, base, alice, first, second});
   await exercisePaperKeys({diem, check, rejects, base, alice, first});
   check(!('blahCall' in globalThis) && !('blahCrypto' in globalThis), 'Global bridge callbacks leaked');

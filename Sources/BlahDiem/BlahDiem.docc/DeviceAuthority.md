@@ -83,6 +83,27 @@ and contain no duplicates; BIDCOM accepts TCP only and can be empty. Clients ver
 profile and that it serves its discovery domain before using these values. The field
 keys and validation belong to each profile type.
 
+## Profile hosting
+
+BlahDiem re-exports `DiemProfileHostingClient`. Supply its HTTP transport and solver;
+use ``AnyBlahProfile/Content/replacingDomains(_:)`` to preserve the profile kind and
+all other fields when preparing a claim or release:
+
+```swift
+let claim = try await identity.claiming(labels: ["alice"], at: host, solver: solver) {
+  try $0.replacingDomains($1)
+}
+// Store the signed revision before publication; retry unanswered PUTs with these bytes.
+try await host.publish(claim, solver: solver)
+```
+
+The same transform works with `identity.releasing(labels:at:transform:)`. Users, bots
+and channels may have no domains; a DC must retain at least one discovery domain.
+A sticker set requires exactly one: replace its short name with `identity.updating`
+instead of appending another name or removing its last name. A full release through
+a formerly held name may not be repeatable after success; callers reconcile that
+case separately. Planning is only a discovery hint; the host decides ownership.
+
 ## Proofs
 
 A DC issues a ``BlahStatement`` — a login, invocation or approval challenge — and a device

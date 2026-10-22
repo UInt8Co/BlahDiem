@@ -14,6 +14,9 @@ importers:
       '@noble/curves':
         specifier: 2.4.0
         version: 2.4.0
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
     devDependencies:
       '@bjorn3/browser_wasi_shim':
         specifier: 0.3.0

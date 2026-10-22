@@ -189,9 +189,8 @@ JavaScriptEventLoop.installGlobalExecutor()
         hosted.home = Home(dc: dc, epoch: home.epoch + 1, expiresAt: backend.now + deviceLifetime)
         try await identity.update(hosted.content)
       case "domains":
-        guard kind == "user", let names = input.domains, !names.isEmpty else { throw BlahError.invalidName }
-        hosted.domains = try names.map { try DomainName($0) }
-        try await identity.update(hosted.content)
+        guard let names = input.domains, !names.isEmpty else { throw BlahError.invalidName }
+        try await identity.update(identity.profile.content.replacingDomains(names.map { try DomainName($0) }))
       case "account":
         guard atHome else { throw BlahError.wrongHome }
         guard let account = Int64(input.account ?? ""), account > 0,
@@ -214,7 +213,7 @@ JavaScriptEventLoop.installGlobalExecutor()
         namespace = try ClientNamespace(profile: identity.profile,
           dc: DCAddress(domain: DomainName(input.dcDomain), id: dc), generation: generation).identifier
       }
-      return IdentityResult(id: identity.id.description, namespace: namespace, domains: hosted.domains.map { $0.name },
+      return IdentityResult(id: identity.id.description, namespace: namespace, domains: identity.profile.domains.map { $0.name },
         profile: identity.profile.encoding, proof: proof,
         account: hosted.home?.account.map(String.init) ?? "",
         notBefore: Double(identity.profile.validity.notBefore),

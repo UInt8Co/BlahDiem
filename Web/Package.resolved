@@ -6,7 +6,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/UInt8Co/diem.git",
       "state" : {
-        "revision" : "bc15912edb2bc770389bc8981e749320776b6cf1"
+        "revision" : "5f0017a4f664473e5bdfa985c1707aa4937075d6"
       }
     },
     {

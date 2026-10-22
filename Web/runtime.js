@@ -1,5 +1,6 @@
 // BridgeJS generates both sides of the ABI; this adapter only normalizes JS inputs.
 import {init} from './.build-embedded/plugins/PackageToJS/outputs/Package/index.js';
+import {hosting} from './hosting.js';
 import {keyFiles, paperKeys, generateSigningKey} from './key-files.js';
 
 const operations = new Set(['create', 'inspect', 'renew', 'account', 'home', 'domains', 'addDevice', 'removeDevice', 'prove']);
@@ -27,6 +28,7 @@ function validTime(value) { return Number.isSafeInteger(value) && value >= 0; }
 export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.url)) {
   const {exports} = await init({module: fetch(wasmURL), getImports: () => ({})});
   return {
+    hosting: hosting(exports, bytes),
     keyFiles: keyFiles(exports),
     paperKeys: paperKeys(exports),
     generateSigningKey,
