@@ -36,9 +36,20 @@ async function exerciseRecovery(diem) {
   check(legacyOpened.contents.profile === opened.contents.profile, 'Existing browser files remain readable');
   check(legacyOpened.contents.identity.privateKey === opened.contents.identity.privateKey, 'Existing recovery authority preserved');
   legacyOpened.session.destroy();
-  const browserFile = await opened.session.seal(opened.contents);
+  check(opened.contents.hosting === undefined, 'Old native files need no hosting record');
+  const hosting = {domain: 'host.example', held: ['keys'], proofs: {keys: [0, 255], next: [1]}};
+  const browserFile = await opened.session.seal({...opened.contents, hosting: {...hosting,
+    pending: {profile: [99], via: 'keys', labels: ['keys']}}});
   const roundTrip = await diem.keyFiles.unlock(browserFile, 'x');
   check(roundTrip.contents.profile === opened.contents.profile, 'Profile preserved');
+  check(JSON.stringify(roundTrip.contents.hosting) === JSON.stringify(hosting), 'Hosting record preserved without pending bytes');
+  for(const invalid of [null, {...hosting, domain: 'UPPER.example'}, {...hosting, domain: 'localhost'},
+    {...hosting, held: ['a.b']}, {...hosting, held: ['keys', 'keys']}, {...hosting, held: Array.from({length: 17}, (_, i) => 'a' + i)},
+    {...hosting, proofs: {keys: []}}, {...hosting, proofs: {keys: Array(65).fill(0)}},
+    {...hosting, held: Array(1)}, {...hosting, proofs: {keys: Array(1)}},
+    {...hosting, proofs: {keys: [-1]}}, {...hosting, proofs: {keys: [256]}}, {...hosting, proofs: {keys: [1.5]}}]) {
+    await rejects(() => opened.session.seal({...opened.contents, hosting: invalid}));
+  }
   check(roundTrip.contents.identity.privateKey === opened.contents.identity.privateKey, 'Recovery authority preserved');
   roundTrip.session.destroy();
   await rejects(() => roundTrip.session.open(browserFile));

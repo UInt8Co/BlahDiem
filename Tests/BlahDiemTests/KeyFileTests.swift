@@ -99,7 +99,7 @@ import Testing
     }
     let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().appendingPathComponent("Web/tests")
-    for name in ["key-file-native.json", "key-file-browser.json"] {
+    for name in ["key-file-native.json", "key-file-browser.json", "key-file-hosting.json"] {
       let url = directory.appendingPathComponent(name)
       if ProcessInfo.processInfo.environment["BLAH_KEY_FILE_VECTOR"] != nil && !FileManager.default.fileExists(atPath: url.path) { continue }
       let vector = try JSONDecoder().decode(Vector.self, from: Data(contentsOf: url))
@@ -107,6 +107,16 @@ import Testing
       let contents = try await file.open(with: recipient, using: backend)
       #expect(contents.keys.count == 2)
       #expect(contents.profile.domains.map(\.name) == ["keys.example"])
+      if name == "key-file-hosting.json" {
+        let metadata = try contents.metadata.recordValue(requiredKeys: 0..<0)
+        let hosting = try #require(metadata[7]).recordValue(requiredKeys: 0..<3)
+        #expect(try hosting[0]!.textValue() == "host.example")
+        #expect(try hosting[1]!.arrayValue() == [.text("keys")])
+        #expect(try hosting[2]!.arrayValue().count == 2)
+        // The unchanged native reader preserves the new application metadata on reseal.
+        let resealed = try await KeyFile.seal(contents, salt: file.salt, to: recipient.publicKey, using: backend)
+        #expect(try await resealed.open(with: recipient, using: backend).metadata == contents.metadata)
+      }
     }
   }
 }

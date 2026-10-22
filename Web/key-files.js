@@ -80,6 +80,20 @@ export function paperKeys(exports) {
   };
 }
 
+function hostingRecord(value) {
+  if(value === undefined) return {hostingDomain: null, hostingHeld: [], hostingProofs: []};
+  if(!value || typeof value.domain !== 'string' || !Array.isArray(value.held) ||
+    !Array.from(value.held).every(name => typeof name === 'string') || !value.proofs ||
+    typeof value.proofs !== 'object' || Array.isArray(value.proofs)) throw new TypeError('Invalid hosting record');
+  // Swift validates canonical DNS names, distinct labels and the combined count.
+  // Check bytes before BridgeJS converts them to UInt8 (which would truncate).
+  const proofs = Object.entries(value.proofs).map(([label, nonce]) => {
+    if(!Array.isArray(nonce) || nonce.length < 1 || nonce.length > 64) throw new TypeError('Invalid hosting record');
+    return {label, nonce: fileBytes(Array.from(nonce))};
+  });
+  return {hostingDomain: value.domain, hostingHeld: value.held, hostingProofs: proofs};
+}
+
 export function keyFiles(exports) {
   const inspect = file => exports.keyFileInfo(fileBytes(file));
   async function create(password, salt = crypto.getRandomValues(new Uint8Array(16))) {
@@ -126,7 +140,7 @@ export function keyFiles(exports) {
           return bytes(await exports.sealKeyFile({profile: Array.from(decode(value.profile)), identity, device,
             domain: value.domain, publisher: value.publisher || '', token: value.token || '',
             profileDays: policy.profileDays, deviceDays: policy.deviceDays, autoRenew: policy.autoRenew,
-            publicationPending: !!value.publicationPending}, Array.from(salt), backend));
+            publicationPending: !!value.publicationPending, ...hostingRecord(value.hosting)}, Array.from(salt), backend));
         } finally { identity?.fill(0); device?.fill(0); }
       },
       async open(file) {
@@ -140,7 +154,9 @@ export function keyFiles(exports) {
             device: value.device ? await signingKey(value.device) : undefined,
             publisher: value.publisher, token: value.token,
             renewal: {profileDays: value.profileDays, deviceDays: value.deviceDays, autoRenew: value.autoRenew},
-            publicationPending: value.publicationPending};
+            publicationPending: value.publicationPending,
+            hosting: value.hostingDomain ? {domain: value.hostingDomain, held: value.hostingHeld,
+              proofs: Object.fromEntries(value.hostingProofs.map(({label, nonce}) => [label, nonce]))} : undefined};
         } finally { value.identity?.fill(0); value.device?.fill(0); }
       }
     };

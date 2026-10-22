@@ -126,6 +126,13 @@ unverified display identity and salt only; it never grants authority.
 Use `generateSigningKey()` for browser Ed25519 keys. Contents include the signed profile
 and identity and/or device keys; `diem.d.ts` owns the browser shape. Recovery files can
 contain only an identity key, device files only a device key, and browser backups both.
+Optional `hosting: {domain, held, proofs}` contents carry claim routing and public proof
+nonces with a backup. Domains and labels must be canonical lowercase DNS names, with at
+most 16 distinct labels across held names and proofs, and 1–64 bytes per nonce.
+The encrypted metadata map stores this at integer key 7 as `{0: domain, 1: held,
+2: [[label, nonceBytes], …]}`. In-flight `pending` bytes are never included. This remains
+version one: older native readers preserve arbitrary metadata; older browser readers
+ignore key 7 on open (and drop it if resealed). Files without it still open.
 The native `KeyFile` contract defines the CBOR and password/HPKE rules. Recovery files
 are portable between native clients, Chromium and Safari, including existing files.
 The bundled `@hpke/core` implementation uses WebCrypto; `@noble/curves` supplies the

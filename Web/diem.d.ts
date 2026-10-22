@@ -121,6 +121,8 @@ export interface DiemClient {
 export interface SigningKey {privateKey: string; publicKey: string}
 /** The canonical lowercase words, single-spaced, the Ed25519 device key they derive and its encoded Diem public key. */
 export interface PaperKey {phrase: string; key: SigningKey; device: number[]}
+/** Portable claim routing; in-flight publication bytes remain local to the application. */
+export interface KeyFileHosting {domain: string; held: string[]; proofs: Record<string, number[]>}
 export interface KeyFileSecret {
   domain: string;
   profile: string;
@@ -130,6 +132,7 @@ export interface KeyFileSecret {
   token?: string;
   renewal?: {profileDays: number; deviceDays: number; autoRenew: boolean};
   publicationPending?: boolean;
+  hosting?: KeyFileHosting;
 }
 export interface KeyFileSession {
   seal(contents: KeyFileSecret): Promise<Uint8Array>;
