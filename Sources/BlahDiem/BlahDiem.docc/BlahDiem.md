@@ -54,6 +54,14 @@ let proof = try await identity.prove(loginChallenge)
 - ``KeyFileContents``
 - ``KeyFilePrivateKey``
 
+### Device linking
+
+- ``DeviceLinkRequest``
+- ``DeviceLinkCode``
+- ``DeviceLinkGrant``
+- ``DeviceLinkContext``
+- ``DeviceLinkResponse``
+
 ### Errors
 
 - ``BlahError``

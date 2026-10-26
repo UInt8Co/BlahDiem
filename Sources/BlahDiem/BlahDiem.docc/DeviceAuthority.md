@@ -51,6 +51,33 @@ File decoding and KDF work are bounded. JSON files are not accepted. Field numbe
 size limits and the native API belong to ``KeyFile`` and ``KeyFileContents``; the web
 adapter and custody session API are described in the web package's README.
 
+## Linking another device
+
+The new device creates an Ed25519 signing key and a fresh P-256 encryption key. Its
+``DeviceLinkRequest`` goes to the DC; its ``DeviceLinkCode`` travels only in the QR
+code's `blah` parameter. The approving device checks `DeviceLinkCode.matches(_:)`
+against the received bytes before decoding the request, then checks that the new
+device can verify both its identity and device signing algorithms before certifying it.
+Labels are untrusted display text. Cross-platform identities use Ed25519 explicitly;
+native creation continues to default to ML-DSA-65.
+
+Approval certifies the new signing key in the identity's current generation. The
+approving device saves and publishes that signed revision through its existing profile
+publisher before sending a response. The DC learns the revision through its normal
+profile fetch, independently of profile hosting. Linking cannot allocate an account.
+
+``DeviceLinkGrant`` carries those exact published bytes, a listed domain, and optionally
+a Diem `SealedIdentityKey` for the new device. Opaque application metadata is allowed only
+with identity custody, and carries no authority. ``DeviceLinkContext`` binds the response
+to the request digest and QR secret as both HPKE info and associated data. The secret
+never goes to the DC. Opening requires a live user profile, an active home at the expected
+DC with an allocated account, a listed domain, and certification of the requested device
+in the current generation. Transferred identity custody must open to the profile's key.
+
+Any opening failure ends the link session. After success the caller stores custody
+before completing sign-in with a proof from the new device. Account password checks still
+apply. The web package's README describes its opaque session and custody API.
+
 ## Profiles
 
 Each Blah profile type conforms to ``BlahProfile``, a Diem `DomainNamedProfile`. Its

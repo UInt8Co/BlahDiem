@@ -13,6 +13,10 @@ enum BlahTag: UInt64 {
   case keyFile = 14
   case keyFileContents = 15
   case privateKey = 16
+  case deviceLinkRequest = 17
+  case deviceLinkCode = 18
+  case deviceLinkGrant = 19
+  case deviceLinkContext = 20
 }
 
 /// Profile kind codes, at ``UserProfile/cborKeyKind`` in every Blah profile.

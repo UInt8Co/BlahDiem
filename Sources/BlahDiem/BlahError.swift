@@ -12,4 +12,6 @@ public enum BlahError: Error, Sendable, Equatable {
   case challengeExpired
   /// A profile belongs to a different client namespace.
   case wrongNamespace
+  /// A device-link record is malformed or does not match its QR code.
+  case invalidDeviceLink
 }

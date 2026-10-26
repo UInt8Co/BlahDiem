@@ -2,7 +2,7 @@
 
 BlahDiem carries Blah's profiles and proofs on [Diem](https://github.com/UInt8Co/diem)
 identities: user, bot, channel, sticker-set and DC profiles, the DC challenges that
-devices sign, password-protected HPKE key files, and the client cache namespace. Blah clients and DCs share it. It is
+devices sign, QR device-link records, password-protected HPKE key files, and the client cache namespace. Blah clients and DCs share it. It is
 Foundation-free and runs on any Diem `CryptoBackend`.
 
 Blah profile types adopt Diem's profile protocols and sign their fields directly in the
