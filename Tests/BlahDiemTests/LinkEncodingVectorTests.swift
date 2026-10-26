@@ -41,10 +41,35 @@ import Testing
     #expect(!code.matches(request.encoding))
     #expect(throws: (any Error).self) { try DeviceLinkCode(parameter: code.parameter + "=") }
     #expect(throws: (any Error).self) { try DeviceLinkCode(parameter: "A") }
-    // A 55-byte code has four unused low bits in its last base64url character.
+    // A 58-byte code has four unused low bits in its last base64url character.
     let canonical = try DeviceLinkCode(requestDigest: request.digest, secret: Array(repeating: 0, count: 16))
     #expect(throws: (any Error).self) {
       try DeviceLinkCode(parameter: String(canonical.parameter.dropLast()) + "B")
+    }
+  }
+
+  @Test func openingRequiresAnExpectedDCAndActiveHome() async throws {
+    let backend = TestBackend()
+    let recipient = try await backend.makeEncryptionKey(.p256)
+    let device = try await DevicePrivateKey.generate(.ed25519, using: backend)
+    let request = try DeviceLinkRequest(device: device.publicKey, recipient: recipient.publicKey,
+      label: "Desktop", verifies: [.ed25519])
+    let code = try DeviceLinkCode(request: request, using: backend)
+    let domain = try DomainName("link.example")
+    var identity = try await BasicIdentity<UserProfile>(
+      HostedContent(home: Fixture.home(account: 42), domains: [domain]),
+      identityKey: .generate(.ed25519, using: backend), deviceKey: .generate(.ed25519, using: backend), using: backend)
+    try await identity.add(device.publicKey)
+    let grant = try DeviceLinkGrant(profile: identity.profile.encoding, domain: domain)
+    let response = try await DeviceLinkResponse.seal(grant, for: request, code: code, using: backend)
+    await #expect(throws: BlahError.wrongHome) {
+      try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
+        code: code, expectedDC: nil, using: backend)
+    }
+    // The profile remains valid beyond this independently expiring home delegation.
+    await #expect(throws: BlahError.wrongHome) {
+      try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
+        code: code, expectedDC: Fixture.dcID, at: backend.now + 3600, using: backend)
     }
   }
 }

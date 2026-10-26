@@ -72,6 +72,14 @@ export interface HostingClientError {
 }
 
 export interface DiemClient {
+  deviceLink: {
+    /** Ed25519 device + fresh P-256 HPKE recipient. Private keys stay in an isolated worker. */
+    begin(label: string): Promise<{request: Uint8Array; parameter: string; session: DeviceLinkSession}>;
+    /** Consumes the session on success or failure. expectedDC is the connected DC's 32-byte identity. */
+    open(session: DeviceLinkSession, response: Uint8Array | number[], expectedDC: Uint8Array | number[]): Promise<DeviceLinkOpened>;
+    /** Checks the QR digest before decoding the public request. Check verifies before certifying. */
+    inspect(parameter: string, request: Uint8Array | number[]): Promise<{device: Uint8Array; label: string; verifies: number[]}>;
+  };
   hosting: {
     /** fetch with redirect:'error', credentials:'omit', cache:'no-store',
      * referrerPolicy:'no-referrer', a timeout (default 15 s) combined with `signal`, and a
@@ -135,8 +143,35 @@ export interface KeyFileSecret {
   hosting?: KeyFileHosting;
 }
 export interface KeyFileSession {
-  seal(contents: KeyFileSecret): Promise<Uint8Array>;
+  /** Also accepts canonical KeyFileContents returned by deviceLink.open. */
+  seal(contents: KeyFileSecret | Uint8Array | number[]): Promise<Uint8Array>;
   open(file: Uint8Array | number[]): Promise<KeyFileSecret>;
+  /** Requires identity custody and the exact profile most recently saved/opened in this session.
+   * Call only after publishing that profile. Metadata defaults to portable custody settings. */
+  respondToDeviceLink(input: DeviceLinkApproval): Promise<Uint8Array>;
   destroy(): void;
+}
+declare const deviceLinkSession: unique symbol;
+export interface DeviceLinkSession {
+  readonly [deviceLinkSession]: true;
+  /** Releases the worker and its WASM memory; pending operations reject. */
+  destroy(): void;
+}
+export interface DeviceLinkOpened {
+  profile: Uint8Array;
+  domain: string;
+  identityKey: boolean;
+  metadata?: Uint8Array;
+  /** Sensitive custody bytes. Pass to keyFiles.create(password).seal(...) and clear after use. */
+  keyFileContents: Uint8Array;
+}
+export interface DeviceLinkApproval {
+  parameter: string;
+  request: Uint8Array | number[];
+  profile: Uint8Array | number[];
+  domain: string;
+  transferIdentity: boolean;
+  /** At most 16 KiB, only with transferIdentity. Unknown formats are ignored by receivers. */
+  metadata?: Uint8Array | number[];
 }
 export function createDiem(wasmURL?: string | URL): Promise<DiemClient>;

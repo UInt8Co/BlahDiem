@@ -112,6 +112,16 @@ struct KeyFileHosting {
   } catch { throw JSException(message: bridgeError(error)) }
 }
 
+/// Installs native custody bytes returned by device linking without exporting individual keys.
+@JS public func sealKeyFileContents(encoding: [UInt8], salt: [UInt8], crypto: JSObject) async throws(JSException) -> [UInt8] {
+  do {
+    let backend = BrowserBackend(now: 0, crypto: crypto)
+    let contents = try KeyFileContents(encoding: encoding)
+    let recipient = try await backend.makeEncryptionKey(.p256)
+    return try await KeyFile.seal(contents, salt: salt, to: recipient.publicKey, using: backend).encoding
+  } catch { throw JSException(message: bridgeError(error)) }
+}
+
 @JS public func openKeyFile(encoding: [UInt8], crypto: JSObject) async throws(JSException) -> KeyFilePayload {
   do {
     let backend = BrowserBackend(now: 0, crypto: crypto)

@@ -34,7 +34,7 @@ if(git(['rev-parse', 'HEAD']).trim() !== base) throw new Error('Unexpected Diem 
 if(git(['status', '--porcelain']).trim()) {
   throw new Error('Diem checkout differs from its pinned revision. Use a clean Web/.build-embedded.');
 }
-run(swift, [...packageArgs, '-j', '4', '-Xswiftc', '-Osize', '-Xswiftc', '-gnone',
+run(swift, [...packageArgs, '-j', '3', '-Xswiftc', '-Osize', '-Xswiftc', '-gnone',
   'js', '-c', 'release', '--no-optimize'], {stdio: 'inherit'});
 await rm(output, {recursive: true, force: true});
 await mkdir(output, {recursive: true});
@@ -44,6 +44,8 @@ run(optimizer, [`${output}stripped.wasm`, '-Oz', '--strip-producers', '-o', `${o
 await rm(`${output}stripped.wasm`);
 await build({entryPoints: [`${web}runtime.js`], outfile: `${output}diem.js`, bundle: true,
   format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'none'});
+await build({entryPoints: [`${web}device-link-worker.js`], outfile: `${output}device-link-worker.js`, bundle: true,
+  format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'none'});
 await copyFile(`${generated}bridge-js.d.ts`, `${output}bridge-js.d.ts`);
 await copyFile(`${web}diem.d.ts`, `${output}diem.d.ts`);
 await copyFile(`${root}LICENSE`, `${output}LICENSE`);
@@ -52,9 +54,10 @@ const notices = await Promise.all([resolve(swiftResources, '../../share/swift/LI
 await writeFile(`${output}THIRD_PARTY_LICENSES`, notices.map(text => text.trimEnd()).join('\n\n---\n\n') + '\n');
 await copyFile(`${web}README.md`, `${output}README.md`);
 await writeFile(`${output}package.json`, JSON.stringify({name: '@blahim/diem-web', version: process.env.GITHUB_REF_NAME?.match(/^web-v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)$/)?.[1] || '0.0.0-dev', type: 'module',
-  license: 'MIT', types: './diem.d.ts', exports: {'.': {types: './diem.d.ts', default: './diem.js'}, './diem.wasm': './diem.wasm'}}, null, 2) + '\n');
+  license: 'MIT', types: './diem.d.ts', exports: {'.': {types: './diem.d.ts', default: './diem.js'},
+    './diem.wasm': './diem.wasm', './device-link-worker.js': './device-link-worker.js'}}, null, 2) + '\n');
 const files = {};
-for(const name of ['diem.js', 'diem.wasm', 'diem.d.ts', 'bridge-js.d.ts', 'package.json', 'LICENSE', 'THIRD_PARTY_LICENSES', 'README.md']) {
+for(const name of ['diem.js', 'device-link-worker.js', 'diem.wasm', 'diem.d.ts', 'bridge-js.d.ts', 'package.json', 'LICENSE', 'THIRD_PARTY_LICENSES', 'README.md']) {
   const bytes = await readFile(output + name);
   files[name] = {bytes: bytes.length, sha256: hash(bytes)};
   if(name.endsWith('.js') || name.endsWith('.wasm')) {
@@ -72,7 +75,11 @@ for(const name of ['diem.js', 'diem.wasm', 'diem.d.ts', 'bridge-js.d.ts', 'packa
 // Paper keys add Diem's 13 KB BIP 39 word list; hosting adds the bounded JSON
 // client, HTTP/solver bridges and proof verification (about 106 KB raw / 30 KB Brotli).
 // The yielding SHA-256 solver and hosting ABI add about 10 KB of JS.
-if(files['diem.wasm'].bytes > 580_000 || files['diem.wasm.br'].bytes > 190_000 || files['diem.js'].bytes > 150_000) {
+// Device linking adds bounded records, sealed identity transfer and its bridge
+// (about 55 KB raw / 17 KB Brotli WASM). Window key isolation loads a separate
+// worker bundle (about 103 KB raw / 22 KB Brotli) only when beginning a link.
+if(files['diem.wasm'].bytes > 650_000 || files['diem.wasm.br'].bytes > 215_000 ||
+  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 110_000) {
   throw new Error('Web artifact exceeds its size budget; inspect before releasing.');
 }
 const source = {repository: 'https://github.com/UInt8Co/BlahDiem',
@@ -83,4 +90,5 @@ await writeFile(`${output}manifest.json`, JSON.stringify({format: 1, source, swi
 const checksums = [...Object.entries(files).map(([name, info]) => `${info.sha256}  ${name}`),
   `${hash(await readFile(output + 'manifest.json'))}  manifest.json`];
 await writeFile(output + 'SHA256SUMS', checksums.join('\n') + '\n');
-console.log(JSON.stringify({wasm: files['diem.wasm'], brotli: files['diem.wasm.br'], js: files['diem.js']}, null, 2));
+console.log(JSON.stringify({wasm: files['diem.wasm'], brotli: files['diem.wasm.br'], js: files['diem.js'],
+  worker: files['device-link-worker.js']}, null, 2));

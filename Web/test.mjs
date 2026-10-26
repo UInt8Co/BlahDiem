@@ -57,6 +57,7 @@ try {
       assert.equal(result.realm, 'worker');
     }
     console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: profile hosting, PoW, cancellation and transport bounds, public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, Safari key imports, HPKE key files and native interoperability, concurrent signers, devices and rejection.`);
+    await (await import('./tests/device-link-runner.mjs')).runDeviceLinkTests(page, engine.name());
     await browser.close(); browser = undefined;
   }
 } finally {

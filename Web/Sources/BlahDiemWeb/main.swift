@@ -243,6 +243,7 @@ func bridgeError(_ error: any Error) -> String {
     case .invalidChallenge: return "invalidChallenge"
     case .challengeExpired: return "challengeExpired"
     case .wrongNamespace: return "wrongNamespace"
+    case .invalidDeviceLink: return "invalidDeviceLink"
     }
   }
   if let error = error as? DiemError {

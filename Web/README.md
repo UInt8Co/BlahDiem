@@ -148,11 +148,69 @@ rejects unknown words, a wrong word count or a failed checksum. A restored paper
 ordinary device: it signs in only while the identity's current profile lists it and cannot
 manage devices. Diem's `PaperDeviceKey` owns the words and derivation.
 
+## QR device linking
+
+`deviceLink.begin(label)` returns `{request, parameter, session}`. Send only `request`
+to the DC and put `parameter` in the QR URL's `blah` parameter. Labels are untrusted
+display text of 1–64 UTF-8 bytes. Each session creates a fresh P-256 HPKE recipient and
+an Ed25519 device key in worker/WASM memory. Window callers use an isolated worker;
+callers already in a dedicated or shared worker keep the session in that worker.
+Call `session.destroy()` on cancellation. Vendor `device-link-worker.js` beside `diem.js`
+and allow that same-origin module worker in the application's content security policy.
+
+On the approving device, `deviceLink.inspect(parameter, request)` checks the digest
+before decoding, returning `{device, label, verifies}`. Before certifying `device`, check
+that `verifies` contains both the identity and approving device's signing algorithms
+(Ed25519 is code 1). Certification requires identity custody. Save the revised profile
+and publish its exact bytes through the identity's existing publisher before approving:
+
+```js
+const response = await unlockedSession.respondToDeviceLink({
+  parameter, request, profile: publishedProfile, domain,
+  transferIdentity: true
+});
+```
+
+`respondToDeviceLink` uses the most recent custody file successfully opened or sealed by
+that session, and requires its profile to equal `profile`. It rechecks the digest,
+algorithms and live profile authority. The caller owns publication and consent;
+`transferIdentity` controls whether the new device can approve more devices. Optional
+`metadata` is opaque bytes, at most 16 KiB, permitted only with identity transfer. When
+omitted during transfer, the SDK includes the portable custody metadata map, excluding
+local publication state. Unknown metadata formats are ignored when installing settings.
+The original metadata bytes remain available in the opening result.
+
+The new device calls `deviceLink.open(session, response, expectedDC)`, where `expectedDC`
+is the connected DC's 32-byte identity. It returns `{profile, domain, identityKey,
+metadata?, keyFileContents}` only after verifying the current user profile, allocated
+account at that DC, listed domain, device certification and any transferred identity key.
+The session ends on success or failure. `identityKey` is a Boolean; individual private
+keys are never returned by the link API.
+
+Install custody before completing sign-in with the new device's proof:
+
+```js
+const opened = await diem.deviceLink.open(session, response, expectedDC);
+const custody = await diem.keyFiles.create(newLocalPassword);
+try {
+  const file = await custody.seal(opened.keyFileContents);
+  await saveCustody(file);
+} finally {
+  opened.keyFileContents.fill(0);
+  custody.destroy();
+}
+```
+
+`keyFileContents` uses the existing sensitive custody path and can contain the device
+key alone or both device and identity keys. A later `keyFiles.unlock` returns the usual
+signing-key shape. The QR secret never goes to the DC; the DC receives ciphertext only.
+The native record and verification contract is documented in `DeviceAuthority.md`.
+
 ## Vendoring a release
 
 Each successful `main` push publishes a GitHub release named `YYYYMMDD-<sha4>`.
 Download a specific release and verify `SHA256SUMS`. Vendor its matching
-`diem.js`, `diem.wasm`, declarations and license files together; retain the release
+`diem.js`, `device-link-worker.js`, `diem.wasm`, declarations and license files together; retain the release
 tag and `manifest.json` with the checksums and source revision.
 
 Serve WASM as `application/wasm`. Supply an explicit WASM URL when relocating the

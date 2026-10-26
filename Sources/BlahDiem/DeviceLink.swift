@@ -238,6 +238,8 @@ public enum DeviceLinkResponse {
   public static func open(_ bytes: [UInt8], recipientKey: EncryptionPrivateKey,
     request: DeviceLinkRequest, code: DeviceLinkCode, expectedDC: Digest? = nil,
     at time: UInt64? = nil, using backend: some CryptoBackend) async throws -> Opened {
+    // A response cannot establish which DC the client intended to connect to.
+    guard let expectedDC else { throw BlahError.wrongHome }
     guard bytes.count <= maximumBytes, code.matches(request.encoding) else { throw BlahError.invalidDeviceLink }
     guard recipientKey.publicKey == request.recipient else { throw DiemError.identityMismatch }
     let fields = try CBOR(decoding: bytes).recordValue(requiredKeys: 0..<2)

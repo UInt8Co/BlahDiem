@@ -1,5 +1,6 @@
 import {Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256} from '@hpke/core';
 import {deriveP256KeyPair} from './recovery-key.js';
+import {linkResponseInput} from './device-links.js';
 
 const suite = new CipherSuite({kem: new DhkemP256HkdfSha256(), kdf: new HkdfSha256(), aead: new Aes256Gcm()});
 const pkcs8Prefix = new Uint8Array([48, 46, 2, 1, 0, 48, 5, 6, 3, 43, 101, 112, 4, 34, 4, 32]);
@@ -94,6 +95,36 @@ function hostingRecord(value) {
   return {hostingDomain: value.domain, hostingHeld: value.held, hostingProofs: proofs};
 }
 
+// Shared by custody and the isolated linking worker. HPKE uses the canonical Swift
+// context as both info and AAD, exactly as the native backend does.
+export function keyBackend(requireKey, publicKey) {
+  return {
+    random: count => crypto.getRandomValues(new Uint8Array(count)),
+    encryptionPublicKey: () => { requireKey(); return publicKey; },
+    restorePublicKey,
+    signRestored: async(raw, message) => bytes(await crypto.subtle.sign('Ed25519', await restore(raw), bytes(message))),
+    verify: async(key, message, signature) => {
+      const algorithm = key.length === 32 ? 'Ed25519' : {name: 'ECDSA', namedCurve: 'P-256'};
+      const publicKey = await crypto.subtle.importKey('raw', bytes(key), algorithm, false, ['verify']);
+      return crypto.subtle.verify(key.length === 32 ? 'Ed25519' : {name: 'ECDSA', hash: 'SHA-256'}, publicKey, bytes(signature), bytes(message));
+    },
+    seal: async(recipient, plaintext, context) => {
+      requireKey();
+      const sender = await suite.createSenderContext({recipientPublicKey: await suite.kem.deserializePublicKey(bytes(recipient)), info: bytes(context)});
+      return {encapsulatedKey: bytes(sender.enc), ciphertext: bytes(await sender.seal(bytes(plaintext), bytes(context)))};
+    },
+    open: async(enc, ciphertext, context) => {
+      const receiver = await suite.createRecipientContext({recipientKey: requireKey().privateKey, enc: bytes(enc), info: bytes(context)});
+      return bytes(await receiver.open(bytes(ciphertext), bytes(context)));
+    }
+  };
+}
+
+export async function linkBackend() {
+  const pair = await suite.kem.generateKeyPair();
+  return keyBackend(() => pair, bytes(await suite.kem.serializePublicKey(pair.publicKey)));
+}
+
 export function keyFiles(exports) {
   const inspect = file => exports.keyFileInfo(fileBytes(file));
   async function create(password, salt = crypto.getRandomValues(new Uint8Array(16))) {
@@ -110,45 +141,36 @@ export function keyFiles(exports) {
     } finally { passwordBytes.fill(0); material?.fill(0); }
     const publicKey = bytes(await suite.kem.serializePublicKey(pair.publicKey));
     const requireKey = () => { if(!pair) throw new Error('Unlock your identity to continue.'); return pair; };
-    const backend = {
-      encryptionPublicKey: () => { requireKey(); return publicKey; },
-      restorePublicKey,
-      signRestored: async(raw, message) => bytes(await crypto.subtle.sign('Ed25519', await restore(raw), bytes(message))),
-      verify: async(key, message, signature) => {
-        const algorithm = key.length === 32 ? 'Ed25519' : {name: 'ECDSA', namedCurve: 'P-256'};
-        const publicKey = await crypto.subtle.importKey('raw', bytes(key), algorithm, false, ['verify']);
-        return crypto.subtle.verify(key.length === 32 ? 'Ed25519' : {name: 'ECDSA', hash: 'SHA-256'}, publicKey, bytes(signature), bytes(message));
-      },
-      seal: async(recipient, plaintext, context) => {
-        requireKey();
-        const sender = await suite.createSenderContext({recipientPublicKey: await suite.kem.deserializePublicKey(bytes(recipient)), info: bytes(context)});
-        const ciphertext = await sender.seal(bytes(plaintext), bytes(context));
-        return {encapsulatedKey: bytes(sender.enc), ciphertext: bytes(ciphertext)};
-      },
-      open: async(enc, ciphertext, context) => {
-        const receiver = await suite.createRecipientContext({recipientKey: requireKey().privateKey, enc: bytes(enc), info: bytes(context)});
-        return bytes(await receiver.open(bytes(ciphertext), bytes(context)));
-      }
-    };
+    const backend = keyBackend(requireKey, publicKey);
+    let latestFile;
     return {
-      destroy() { pair = undefined; },
+      destroy() { pair = undefined; latestFile = undefined; },
       async seal(value) {
         requireKey();
+        if(value instanceof Uint8Array || Array.isArray(value)) {
+          const file = bytes(await exports.sealKeyFileContents(fileBytes(value), Array.from(salt), backend));
+          requireKey(); latestFile = file.slice();
+          return file;
+        }
         const identity = secret(value.identity), device = secret(value.device);
         const policy = value.renewal || {profileDays: 180, deviceDays: 180, autoRenew: true};
         try {
-          return bytes(await exports.sealKeyFile({profile: Array.from(decode(value.profile)), identity, device,
+          const file = bytes(await exports.sealKeyFile({profile: Array.from(decode(value.profile)), identity, device,
             domain: value.domain, publisher: value.publisher || '', token: value.token || '',
             profileDays: policy.profileDays, deviceDays: policy.deviceDays, autoRenew: policy.autoRenew,
             publicationPending: !!value.publicationPending, ...hostingRecord(value.hosting)}, Array.from(salt), backend));
+          requireKey(); latestFile = file.slice();
+          return file;
         } finally { identity?.fill(0); device?.fill(0); }
       },
       async open(file) {
         requireKey();
         const info = inspect(file);
         if(!info.salt.every((byte, index) => salt[index] === byte)) throw new Error('Key-file salt mismatch');
-        const value = await exports.openKeyFile(fileBytes(file), backend);
+        const encoding = fileBytes(file);
+        const value = await exports.openKeyFile(encoding, backend);
         try {
+          requireKey(); latestFile = new Uint8Array(encoding);
           return {domain: value.domain, profile: encode(value.profile),
             identity: value.identity ? await signingKey(value.identity) : undefined,
             device: value.device ? await signingKey(value.device) : undefined,
@@ -158,6 +180,11 @@ export function keyFiles(exports) {
             hosting: value.hostingDomain ? {domain: value.hostingDomain, held: value.hostingHeld,
               proofs: Object.fromEntries(value.hostingProofs.map(({label, nonce}) => [label, nonce]))} : undefined};
         } finally { value.identity?.fill(0); value.device?.fill(0); }
+      },
+      async respondToDeviceLink(input) {
+        requireKey();
+        if(!latestFile) throw new Error('Save the published profile to custody before approving a device.');
+        return bytes(await exports.respondToDeviceLink(linkResponseInput(input), Array.from(latestFile), backend));
       }
     };
   }
