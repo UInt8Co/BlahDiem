@@ -186,6 +186,7 @@ export async function exerciseHosting({diem, check, base, alice, bob, first}) {
   const local = path => new URL('/hosting/' + path, location.href).href;
   const request = path => ({method: 'GET', url: local(path), headers: {}, body: null});
   const fetcher = hosting.fetchTransport();
+  // WebKit also logs an access-control diagnostic for this handled redirect rejection.
   await reject(() => fetcher(request('redirect')), error => error instanceof TypeError);
   for(const path of ['large', 'stream']) await reject(() => fetcher(request(path)), 'tooLarge');
   for(const path of ['hang', 'body-hang']) {

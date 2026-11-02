@@ -13,7 +13,7 @@ async function rejects(action) {
   try { await action(); } catch { rejected = true; }
   check(rejected, 'Expected request rejection');
 }
-export async function run() {
+export async function run({engine, realm}) {
   const instantiate = WebAssembly.instantiateStreaming;
   let memory, diem;
   WebAssembly.instantiateStreaming = async(...args) => {
@@ -108,8 +108,8 @@ export async function run() {
   await rejects(() => perform('inspect', {}, corrupt));
   await exerciseHosting({diem, check, base, alice, bob, first});
   await exerciseProfiles({diem, backend, check, rejects, base, alice, first, second});
-  await exerciseSeeds({diem, check, rejects, base, absent});
-  await exerciseLinkCustody(diem, check, rejects, absent);
+  await exerciseSeeds({diem, check, rejects, base, absent, engine, realm});
+  await exerciseLinkCustody(diem, check, rejects, absent, {engine, realm});
   check(!('blahCall' in globalThis) && !('blahCrypto' in globalThis), 'Global bridge callbacks leaked');
   absent(alice.seed); absent(bob.seed);
   return {realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};

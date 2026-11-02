@@ -5,7 +5,7 @@ const equal = (a, b) => a.length === b.length && a.every((byte, i) => byte === b
 const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 
 // Persistence exercises CryptoKey structured cloning and encrypted seed custody in each realm.
-export async function storedCustody(seed, device, check) {
+export async function storedCustody(seed, device, check, {engine, realm}) {
   const key = await crypto.subtle.generateKey({name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({name: 'AES-GCM', iv}, key, seed);
@@ -17,12 +17,19 @@ export async function storedCustody(seed, device, check) {
     open.onerror = () => reject(open.error);
   });
   try {
-    await new Promise((resolve, reject) => {
+    const write = new Promise((resolve, reject) => {
       const tx = db.transaction('custody', 'readwrite');
       try { tx.objectStore('custody').put({key, iv, ciphertext, device}, 'slot'); }
-      catch(error) { reject(new Error(`IndexedDB custody write: ${error.name}: ${error.message}`)); }
+      catch(error) { reject(error); }
       tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
     });
+    if(engine === 'webkit' && realm === 'SharedWorker') {
+      let failure;
+      try { await write; } catch(error) { failure = error; }
+      check(failure?.name === 'DataCloneError', 'WebKit SharedWorker CryptoKey persistence must fail with DataCloneError; update custody docs if supported');
+      return device;
+    }
+    await write;
     const stored = await new Promise((resolve, reject) => {
       const get = db.transaction('custody').objectStore('custody').get('slot');
       get.onsuccess = () => resolve(get.result); get.onerror = () => reject(get.error);
@@ -35,7 +42,7 @@ export async function storedCustody(seed, device, check) {
   } finally { db.close(); indexedDB.deleteDatabase(name); }
 }
 
-export async function exerciseSeeds({diem, check, rejects, base, absent}) {
+export async function exerciseSeeds({diem, check, rejects, base, absent, engine, realm}) {
   const entropy = new Uint8Array(32);
   const words = diem.seeds.words(entropy);
   check(words.length === 24 && words.slice(0, 23).every(word => word === 'abandon') && words[23] === 'art', 'BIP 39 zero entropy');
@@ -63,10 +70,10 @@ export async function exerciseSeeds({diem, check, rejects, base, absent}) {
     device.privateKey.algorithm.namedCurve === 'P-256' && device.privateKey.usages.join() === 'sign', 'P-256 device has only non-extractable signing authority');
   check(device.publicKey.length === 65 && device.publicKey[0] === 4, 'Device public key is SEC1');
   for(const format of ['pkcs8', 'raw', 'jwk']) await rejects(() => crypto.subtle.exportKey(format, device.privateKey));
-  const persisted = await storedCustody(entropy, device, check);
+  const persisted = await storedCustody(entropy, device, check, {engine, realm});
   const message = new Uint8Array([1, 2, 3]);
   const signature = new Uint8Array(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, persisted.privateKey, message));
-  check(signature.length === 64 && await verify(device.publicKey, message, signature), 'Cloned P-256 key signs fixed-width r||s');
+  check(signature.length === 64 && await verify(device.publicKey, message, signature), 'Custodied P-256 key signs fixed-width r||s');
   const owner = signers(identity, device);
   const created = await diem.identityOperation({...base, operation: 'create', profile: []}, owner);
   const next = await diem.deviceKeys.generate();

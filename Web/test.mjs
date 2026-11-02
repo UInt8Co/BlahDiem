@@ -38,15 +38,15 @@ try {
     const page = await browser.newPage();
     page.on('pageerror', error => console.error(error));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    const windowResult = await page.evaluate(async() => Promise.race([
-      (await import('/tests/scenario.js')).run().catch(error => ({error: `${error.name}: ${error.message}\n${error.stack}`})),
+    const windowResult = await page.evaluate(async engine => Promise.race([
+      (await import('/tests/scenario.js')).run({engine, realm: 'Window'}).catch(error => ({error: `${error.name}: ${error.message}\n${error.stack}`})),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Window test timed out')), 30_000))
-    ]));
+    ]), engine.name());
     if(windowResult.error) throw new Error(windowResult.error);
     assert.equal(windowResult.realm, 'window');
     console.log(`PASS ${engine.name()} identity/custody Window`);
     for(const shared of [false, true]) {
-      const result = await page.evaluate(shared => new Promise((resolve, reject) => {
+      const result = await page.evaluate(({shared, engine}) => new Promise((resolve, reject) => {
         const worker = shared ? new SharedWorker('/tests/worker.js', {type: 'module'}) : new Worker('/tests/worker.js', {type: 'module'});
         const port = shared ? worker.port : worker;
         const timer = setTimeout(() => reject(new Error('Worker timed out')), 30_000);
@@ -54,11 +54,13 @@ try {
         worker.onerror = event => { cleanup(); reject(new Error(event.message)); };
         port.onmessage = event => { cleanup(); event.data.error ? reject(new Error(event.data.error)) : resolve(event.data.result); };
         if(shared) port.start();
-      }), shared);
+        port.postMessage({engine});
+      }), {shared, engine: engine.name()});
       assert.equal(result.realm, 'worker');
       console.log(`PASS ${engine.name()} identity/custody ${shared ? 'SharedWorker' : 'DedicatedWorker'}`);
     }
-    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: profile hosting, PoW, cancellation and transport bounds, public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, seed custody, non-extractable P-256 signing and IndexedDB persistence, concurrent signers, devices and rejection.`);
+    const persistence = engine === webkit ? 'IndexedDB persistence in Window and DedicatedWorker, SharedWorker DataCloneError canary and in-memory custody' : 'IndexedDB persistence in all realms';
+    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: profile hosting, PoW, cancellation and transport bounds, public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, seed custody, non-extractable P-256 signing, ${persistence}, concurrent signers, devices and rejection.`);
     await (await import('./tests/device-link-runner.mjs')).runDeviceLinkTests(page, engine.name());
     await browser.close(); browser = undefined;
   }

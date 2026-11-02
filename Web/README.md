@@ -138,6 +138,8 @@ is generated as ECDSA P-256 with `extractable:false` and `usages:['sign']`; the 
 key is raw 65-byte SEC1. Persist the CryptoKey object in IndexedDB by structured clone.
 Never export or serialize device private keys. A device key serves exactly one session.
 WebCrypto custody is `KeyProtection.nonExportable`, without a hardware guarantee.
+On Safari/WebKit, persist or transfer CryptoKeys only from a Window or DedicatedWorker;
+a SharedWorker can hold them only in memory.
 
 Store each account slot's seed encrypted with AES-GCM under a separate non-extractable
 CryptoKey kept in IndexedDB. Use a new 12-byte random IV for each encryption. Applications
@@ -298,8 +300,9 @@ Build output is in `Web/dist/`. The build pins dependencies, generates BridgeJS
 bindings, minimizes the Embedded Swift binary and enforces artifact size limits.
 Tests run real WebCrypto operations in Window, DedicatedWorker and SharedWorker under
 Chromium and WebKit: recovery words, non-extractable P-256 signatures, IndexedDB CryptoKey
-custody, seed transfer and native/browser HPKE interoperability. The supplied
-Linux WPE runtime can fail CryptoKey persistence or Ed25519 imports in worker scenarios;
+custody, seed transfer and native/browser HPKE interoperability. In WebKit SharedWorkers,
+tests require IndexedDB CryptoKey writes to fail with `DataCloneError` and continue with
+in-memory keys. The supplied Linux WPE runtime can intermittently fail Ed25519 imports;
 macOS CI checks Safari's native backend.
 The [release workflow](../.github/workflows/web-release.yml) owns CI tool installation,
 testing and packaging.

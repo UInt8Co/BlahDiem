@@ -3,7 +3,7 @@ import {backend as makeBackend, signers} from './signers.js';
 import {storedCustody} from './seeds.js';
 
 // Exercise real Window/worker-generated devices without serializing signing secrets.
-export async function exerciseLinkCustody(diem, check, rejects, absent) {
+export async function exerciseLinkCustody(diem, check, rejects, absent, context) {
   const instantiate = WebAssembly.instantiateStreaming;
   const isolated = [];
   if(typeof Worker !== 'function') WebAssembly.instantiateStreaming = async(...args) => {
@@ -11,7 +11,7 @@ export async function exerciseLinkCustody(diem, check, rejects, absent) {
     isolated.push(result.instance.exports.memory);
     return result;
   };
-  try { await linkCustody(diem, check, rejects, absent); }
+  try { await linkCustody(diem, check, rejects, absent, context); }
   finally { WebAssembly.instantiateStreaming = instantiate; }
   if(typeof Worker !== 'function') {
     check(isolated.length > 0, 'SharedWorker links use separate WASM instances');
@@ -21,7 +21,7 @@ export async function exerciseLinkCustody(diem, check, rejects, absent) {
   }
 }
 
-async function linkCustody(diem, check, rejects, absent) {
+async function linkCustody(diem, check, rejects, absent, context) {
   const owner = await makeBackend(diem);
   const base = {kind: 'user', domain: 'linked.example', dcDomain: 'dc.example', dc: new Uint8Array(32).fill(13),
     generation: '1', now: Math.floor(Date.now() / 1000)};
@@ -47,11 +47,11 @@ async function linkCustody(diem, check, rejects, absent) {
         check(opened.seed.every((v, i) => v === owner.seed[i]), 'Grant transfers the root entropy');
         check(opened.metadata.every((v, i) => v === metadata[i]), 'Opaque metadata preserved');
       } else check(opened.metadata === undefined, 'Device-only grant carries no metadata');
-      const persisted = await storedCustody(opened.seed ?? new Uint8Array(32), opened.device, check);
+      const persisted = await storedCustody(opened.seed ?? new Uint8Array(32), opened.device, check, context);
       const identity = opened.seed ? await diem.seeds.identity(opened.seed) : undefined;
       const linked = signers(identity, persisted);
       const inspectedProfile = await diem.identityOperation({...base, operation: 'inspect', profile}, linked);
-      check(inspectedProfile.devices.some(x => x.current), 'Persisted joining signer opens its certified profile');
+      check(inspectedProfile.devices.some(x => x.current), 'Custodied joining signer opens its certified profile');
       if(transfer) {
         const renewed = await diem.identityOperation({...base, operation: 'renew', profile, now: base.now + 1}, linked);
         check(renewed.id === inspectedProfile.id, 'Transferred seed manages the identity');
