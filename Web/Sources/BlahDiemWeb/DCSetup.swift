@@ -7,14 +7,16 @@ import JavaScriptKit
   public let now: Double
   public let profileLifetime: Double
   public let deviceLifetime: Double
+  public let removeDevices: [[UInt8]]
 
   public init(data: [UInt8], profile: [UInt8]?, now: Double,
-    profileLifetime: Double, deviceLifetime: Double) {
+    profileLifetime: Double, deviceLifetime: Double, removeDevices: [[UInt8]]) {
     self.data = data
     self.profile = profile
     self.now = now
     self.profileLifetime = profileLifetime
     self.deviceLifetime = deviceLifetime
+    self.removeDevices = removeDevices
   }
 }
 
@@ -45,14 +47,15 @@ import JavaScriptKit
     guard case .dc(let content) = try AnyBlahProfile.Content(fields: ProfileFields(encoding: input.data))
     else { throw BlahError.invalidProfile }
     let identityKey = try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity))
-    let deviceKey = try await DevicePrivateKey(backend.makePrivateKey(.ed25519, for: .device))
-    var identity: BasicIdentity<DCProfile>
+    let deviceKey = try await DevicePrivateKey(backend.makePrivateKey(.p256, for: .device))
+    let removals = try Set(input.removeDevices.map { try Digest(bytes: $0) })
+    guard !removals.contains(deviceKey.publicKey.id) else { throw DiemError.identityMismatch }
+    let identity: BasicIdentity<DCProfile>
     if let profile = input.profile {
-      identity = try await BasicIdentity(profile: DCProfile(encoding: profile),
-        deviceKey: deviceKey, identityKey: identityKey,
+      let old = try DCProfile(encoding: profile)
+      identity = try await BasicIdentity.enrolling(deviceKey, in: old, identityKey: identityKey,
+        removing: removals, publishing: content,
         profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
-      try await identity.renew()
-      try await identity.update(content)
     } else {
       identity = try await BasicIdentity(content, identityKey: identityKey, deviceKey: deviceKey,
         profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)

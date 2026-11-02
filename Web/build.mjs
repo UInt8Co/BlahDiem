@@ -34,6 +34,7 @@ if(git(['rev-parse', 'HEAD']).trim() !== base) throw new Error('Unexpected Diem 
 if(git(['status', '--porcelain']).trim()) {
   throw new Error('Diem checkout differs from its pinned revision. Use a clean Web/.build-embedded.');
 }
+run(process.execPath, ['--test', 'Web/tests/seeds.test.mjs', 'Web/tests/device-links.test.mjs'], {stdio: 'inherit'});
 run(swift, [...packageArgs, '-j', '3', '-Xswiftc', '-Osize', '-Xswiftc', '-gnone',
   'js', '-c', 'release', '--no-optimize'], {stdio: 'inherit'});
 await rm(output, {recursive: true, force: true});
@@ -70,16 +71,10 @@ for(const name of ['diem.js', 'device-link-worker.js', 'diem.wasm', 'diem.d.ts',
     }
   }
 }
-// Includes the key-file codec, HPKE and Noble's P-256 public-point derivation
-// for complete private-key imports on Safari (about 136 KB of JS in total).
-// Paper keys add Diem's 13 KB BIP 39 word list; hosting adds the bounded JSON
-// client, HTTP/solver bridges and proof verification (about 106 KB raw / 30 KB Brotli).
-// The yielding SHA-256 solver and hosting ABI add about 10 KB of JS.
-// Device linking adds bounded records, sealed identity transfer and its bridge
-// (about 55 KB raw / 17 KB Brotli WASM). Window key isolation loads a separate
-// worker bundle (about 103 KB raw / 22 KB Brotli) only when beginning a link.
+// Budgets include recovery words, HPKE and Ed25519 public derivation.
+// The worker also derives public identity keys when checking transferred seeds.
 if(files['diem.wasm'].bytes > 650_000 || files['diem.wasm.br'].bytes > 215_000 ||
-  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 110_000) {
+  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 140_000) {
   throw new Error('Web artifact exceeds its size budget; inspect before releasing.');
 }
 const source = {repository: 'https://github.com/UInt8Co/BlahDiem',

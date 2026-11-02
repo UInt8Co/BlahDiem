@@ -3,8 +3,8 @@ import {encode, decode} from './cbor.js';
 import {createDiem} from '../dist/diem.js';
 import {exerciseHosting} from './hosting.js';
 import {exerciseProfiles} from './profiles.js';
-import {exerciseKeyFiles} from './key-files.js';
-import {exercisePaperKeys} from './paper-keys.js';
+import {exerciseSeeds} from './seeds.js';
+import {backend as makeBackend} from './signers.js';
 import {exerciseLinkCustody} from './link-custody.js';
 
 function check(condition, message) { if(!condition) throw new Error(message); }
@@ -13,29 +13,23 @@ async function rejects(action) {
   try { await action(); } catch { rejected = true; }
   check(rejected, 'Expected request rejection');
 }
-async function backend() {
-  const keys = {};
-  const publicKeys = {};
-  for(const role of ['identity', 'device']) {
-    keys[role] = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
-    publicKeys[role] = new Uint8Array(await crypto.subtle.exportKey('raw', keys[role].publicKey));
-  }
-  return {
-    random: length => crypto.getRandomValues(new Uint8Array(length)),
-    publicKey: role => publicKeys[role],
-    sign: async(role, bytes) => new Uint8Array(await crypto.subtle.sign('Ed25519', keys[role].privateKey, new Uint8Array(bytes))),
-    verify: async(key, bytes, signature) => {
-      const algorithm = key.length === 65 ? {name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256'} : 'Ed25519';
-      return crypto.subtle.verify(algorithm,
-        await crypto.subtle.importKey('raw', new Uint8Array(key), algorithm, false, ['verify']),
-        new Uint8Array(signature), new Uint8Array(bytes));
+export async function run() {
+  const instantiate = WebAssembly.instantiateStreaming;
+  let memory, diem;
+  WebAssembly.instantiateStreaming = async(...args) => {
+    const result = await instantiate(...args);
+    memory = result.instance.exports.memory;
+    return result;
+  };
+  try { diem = await createDiem(new URL('../dist/diem.wasm', import.meta.url)); }
+  finally { WebAssembly.instantiateStreaming = instantiate; }
+  const absent = seed => {
+    const heap = new Uint8Array(memory.buffer);
+    for(let offset = heap.indexOf(seed[0]); offset >= 0; offset = heap.indexOf(seed[0], offset + 1)) {
+      check(!seed.every((byte, index) => heap[offset + index] === byte), 'Identity entropy retained in the main WASM heap');
     }
   };
-}
-
-export async function run() {
-  const diem = await createDiem(new URL('../dist/diem.wasm', import.meta.url));
-  const keyFile = await exerciseKeyFiles(diem);
+  const backend = () => makeBackend(diem);
   const alice = await backend(), bob = await backend();
   const base = {operation: 'create', kind: 'user', domain: 'alice.example.org', profile: [], now: 1_800_000_000,
     dc: Array(32).fill(42), dcDomain: 'dc.example.org', generation: '9007199254740993'};
@@ -91,7 +85,7 @@ export async function run() {
   const removed = await perform('removeDevice', {device}, added.profile);
   check(removed.devices.length === 1, 'Device revocation');
   // A native Secure Enclave device uses P-256, including its profile signature.
-  const p256 = await crypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, true, ['sign', 'verify']);
+  const p256 = await crypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, false, ['sign']);
   const keyShape = decode(second.devices[0].key);
   keyShape[3] = 2;
   keyShape[4] = new Uint8Array(await crypto.subtle.exportKey('raw', p256.publicKey));
@@ -114,8 +108,9 @@ export async function run() {
   await rejects(() => perform('inspect', {}, corrupt));
   await exerciseHosting({diem, check, base, alice, bob, first});
   await exerciseProfiles({diem, backend, check, rejects, base, alice, first, second});
-  await exercisePaperKeys({diem, check, rejects, base, alice, first});
-  await exerciseLinkCustody(diem, check, rejects);
+  await exerciseSeeds({diem, check, rejects, base, absent});
+  await exerciseLinkCustody(diem, check, rejects, absent);
   check(!('blahCall' in globalThis) && !('blahCrypto' in globalThis), 'Global bridge callbacks leaked');
-  return {keyFile, realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};
+  absent(alice.seed); absent(bob.seed);
+  return {realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};
 }

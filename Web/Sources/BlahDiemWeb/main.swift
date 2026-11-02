@@ -11,18 +11,19 @@ struct BrowserBackend: CryptoBackend, @unchecked Sendable {
   func randomBytes(count: Int) -> [UInt8] { bytes(crypto.random!(count)) }
   func makePrivateKey(_ algorithm: PublicKey.Algorithm, for purpose: PublicKey.Purpose,
     restoring rawRepresentation: [UInt8]?) async throws -> PrivateKey {
-    guard algorithm == .ed25519 else { throw DiemError.unsupportedAlgorithm }
     if let rawRepresentation {
+      guard algorithm == .ed25519, purpose == .identity else { throw DiemError.unsupportedAlgorithm }
       let raw = bytes(try await JSPromise(crypto.restorePublicKey!(rawRepresentation).object!)!.value)
       return try PrivateKey(publicKey: PublicKey(purpose: purpose, algorithm: .ed25519,
         rawRepresentation: raw), protection: .software, rawRepresentation: rawRepresentation) { message in
         bytes(try await JSPromise(crypto.signRestored!(rawRepresentation, message).object!)!.value)
       }
     }
+    guard algorithm == (purpose == .identity ? .ed25519 : .p256) else { throw DiemError.unsupportedAlgorithm }
     let role = purpose == .identity ? "identity" : "device"
     let raw = bytes(crypto.publicKey!(role))
-    return try PrivateKey(publicKey: PublicKey(purpose: purpose, algorithm: .ed25519,
-      rawRepresentation: raw), protection: .software, rawRepresentation: nil) { message in
+    return try PrivateKey(publicKey: PublicKey(purpose: purpose, algorithm: algorithm,
+      rawRepresentation: raw), protection: .nonExportable, rawRepresentation: nil) { message in
       let value = try await JSPromise(crypto.sign!(role, message).object!)!.value
       return bytes(value)
     }
@@ -38,7 +39,7 @@ struct BrowserBackend: CryptoBackend, @unchecked Sendable {
     return try EncryptionPrivateKey(publicKey: EncryptionPublicKey(algorithm: .p256,
       rawRepresentation: bytes(crypto.encryptionPublicKey!())), protection: .software,
       rawRepresentation: nil) { box, context in
-        bytes(try await JSPromise(crypto.open!(box.encapsulatedKey, box.ciphertext, context).object!)!.value)
+        secretBytes(try await JSPromise(crypto.open!(box.encapsulatedKey, box.ciphertext, context).object!)!.value)
       }
   }
   func seal(_ plaintext: [UInt8], to key: EncryptionPublicKey, context: [UInt8]) async throws -> SealedBox {
@@ -50,6 +51,12 @@ struct BrowserBackend: CryptoBackend, @unchecked Sendable {
 
 func bytes(_ value: JSValue) -> [UInt8] {
   let array = JSObject.global.Array.from(value)
+  return (0..<Int(array.length.number!)).map { UInt8(array[$0].number!) }
+}
+
+private func secretBytes(_ value: JSValue) -> [UInt8] {
+  let array = value.object!
+  defer { _ = array.fill!(0) }
   return (0..<Int(array.length.number!)).map { UInt8(array[$0].number!) }
 }
 
@@ -152,7 +159,7 @@ JavaScriptEventLoop.installGlobalExecutor()
         throw BlahError.invalidProfile
       }
       let backend = BrowserBackend(now: UInt64(input.now), crypto: crypto)
-      let deviceKey = try await DevicePrivateKey(backend.makePrivateKey(.ed25519, for: .device))
+      let deviceKey = try await DevicePrivateKey(backend.makePrivateKey(.p256, for: .device))
       let identityKey = input.operation != "prove" && !bytes(crypto.publicKey!("identity")).isEmpty
         ? try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity)) : nil
       let dc = try Digest(bytes: input.dc)
@@ -167,7 +174,13 @@ JavaScriptEventLoop.installGlobalExecutor()
         identity = try await BasicIdentity(content, identityKey: identityKey, deviceKey: deviceKey,
           profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       } else {
-        identity = try await BasicIdentity(profile: AnyBlahProfile(encoding: input.profile),
+        var profile = try AnyBlahProfile(encoding: input.profile)
+        if input.operation == "enroll" {
+          guard let identityKey else { throw DiemError.identityKeyRequired }
+          profile = try await profile.enrolling(deviceKey, identityKey: identityKey,
+            profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
+        }
+        identity = try await BasicIdentity(profile: profile,
           deviceKey: deviceKey, identityKey: identityKey,
           profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)
       }
@@ -182,6 +195,9 @@ JavaScriptEventLoop.installGlobalExecutor()
       case "renew":
         hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + deviceLifetime, account: home.account)
         try await identity.renew()
+        try await identity.update(hosted.content)
+      case "enroll":
+        hosted.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + deviceLifetime, account: home.account)
         try await identity.update(hosted.content)
       case "home":
         // A home change is a new hosting: a later epoch at `dc`, which allocates its own account.

@@ -1,5 +1,5 @@
 import {createServer} from 'node:http';
-import {readFile, writeFile} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium, webkit} from '@playwright/test';
 import assert from 'node:assert/strict';
@@ -39,11 +39,12 @@ try {
     page.on('pageerror', error => console.error(error));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const windowResult = await page.evaluate(async() => Promise.race([
-      (await import('/tests/scenario.js')).run(),
+      (await import('/tests/scenario.js')).run().catch(error => ({error: `${error.name}: ${error.message}\n${error.stack}`})),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Window test timed out')), 30_000))
     ]));
+    if(windowResult.error) throw new Error(windowResult.error);
     assert.equal(windowResult.realm, 'window');
-    if(process.env.BLAH_KEY_FILE_VECTOR) await writeFile(process.env.BLAH_KEY_FILE_VECTOR, JSON.stringify({file: windowResult.keyFile}) + '\n');
+    console.log(`PASS ${engine.name()} identity/custody Window`);
     for(const shared of [false, true]) {
       const result = await page.evaluate(shared => new Promise((resolve, reject) => {
         const worker = shared ? new SharedWorker('/tests/worker.js', {type: 'module'}) : new Worker('/tests/worker.js', {type: 'module'});
@@ -55,8 +56,9 @@ try {
         if(shared) port.start();
       }), shared);
       assert.equal(result.realm, 'worker');
+      console.log(`PASS ${engine.name()} identity/custody ${shared ? 'SharedWorker' : 'DedicatedWorker'}`);
     }
-    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: profile hosting, PoW, cancellation and transport bounds, public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, Safari key imports, HPKE key files and native interoperability, concurrent signers, devices and rejection.`);
+    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: profile hosting, PoW, cancellation and transport bounds, public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, seed custody, non-extractable P-256 signing and IndexedDB persistence, concurrent signers, devices and rejection.`);
     await (await import('./tests/device-link-runner.mjs')).runDeviceLinkTests(page, engine.name());
     await browser.close(); browser = undefined;
   }

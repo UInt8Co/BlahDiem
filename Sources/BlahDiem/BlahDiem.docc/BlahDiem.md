@@ -10,7 +10,9 @@ Blah proofs.
 
 ```swift
 var user = HostedContent(home: Home(dc: dc.id, epoch: 1, expiresAt: expiry), domains: domains)
-var identity = try await BasicIdentity<UserProfile>(user, using: backend)
+let seed = try IdentitySeed.generate(using: backend)
+var identity = try await BasicIdentity<UserProfile>(user,
+  identityKey: seed.identityKey(.ed25519, using: backend), deviceKey: device, using: backend)
 user.home?.account = accountID
 try await identity.update(user)
 let proof = try await identity.prove(loginChallenge)
@@ -50,9 +52,6 @@ let proof = try await identity.prove(loginChallenge)
 ### Client storage
 
 - ``ClientNamespace``
-- ``KeyFile``
-- ``KeyFileContents``
-- ``KeyFilePrivateKey``
 
 ### Device linking
 

@@ -25,6 +25,48 @@ export async function runDeviceLinkTests(page, engine) {
     await capture(engine, shared ? 'SharedWorker' : 'DedicatedWorker', result);
   }
   console.log(`PASS ${engine} device link Window, DedicatedWorker and SharedWorker: native grants, browser responses, canonical records, request binding, bounds and rejection.`);
+  await crossOriginLink(page.context().browser(), engine);
+}
+
+async function crossOriginLink(browser, engine) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const runtime = 'https://diem-cdn.example/dist/diem.js';
+  try {
+    await page.route('https://diem-page.example/', route => route.fulfill({contentType: 'text/html',
+      body: '<!doctype html><title>Cross-origin device link</title>'}));
+    await context.route('https://diem-cdn.example/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      assert.ok(['/dist/diem.js', '/dist/device-link-worker.js', '/assets/link.wasm'].includes(path));
+      await route.fulfill({body: await readFile(new URL(path.endsWith('.wasm') ? '../dist/diem.wasm' : '..' + path, import.meta.url)),
+        contentType: path.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
+        headers: {'Access-Control-Allow-Origin': '*'}});
+    });
+    await page.goto('https://diem-page.example/');
+    const result = await page.evaluate(async runtime => {
+      const client = await (await import(runtime)).createDiem('https://diem-cdn.example/assets/link.wasm');
+      const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+      const created = [], revoked = [];
+      URL.createObjectURL = blob => { const url = create(blob); created.push(url); return url; };
+      URL.revokeObjectURL = url => { revoked.push(url); revoke(url); };
+      try {
+        const begun = await client.deviceLink.begin('CDN desktop');
+        try {
+          const inspected = await client.deviceLink.inspect(begun.parameter, begun.request);
+          return {label: inspected.label, verifies: inspected.verifies, bytes: begun.request.length, created, revoked};
+        } finally { begun.session.destroy(); }
+      } finally { URL.createObjectURL = create; URL.revokeObjectURL = revoke; }
+    }, runtime);
+    assert.equal(result.label, 'CDN desktop');
+    assert.deepEqual(result.verifies, [1, 2]);
+    assert.ok(result.bytes > 0);
+    assert.equal(result.created.length, 1);
+    assert.ok(result.created[0].startsWith('blob:https://diem-page.example/'));
+    assert.deepEqual(result.revoked, result.created);
+    console.log(`PASS ${engine} cross-origin Window device link: CDN worker, explicit WASM URL and blob revocation`);
+  } finally {
+    await context.close();
+  }
 }
 
 async function capture(engine, realm, result) {

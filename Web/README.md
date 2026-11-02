@@ -2,9 +2,9 @@
 
 The WASM library runs BlahDiem's canonical profile and proof rules in windows,
 dedicated workers and shared workers. BridgeJS generates the JavaScript ABI and
-TypeScript declarations. WebCrypto supplies Ed25519 signing and Ed25519/P-256 verification;
-BlahDiem owns password-protected CBOR key files and key serialization. Applications own
-storage, unlock lifetimes, publication and user consent.
+TypeScript declarations. WebCrypto signs with seed-derived Ed25519 identity keys and
+non-extractable ECDSA P-256 device keys, and verifies both algorithms. Applications own
+encrypted seed storage, platform key persistence, publication and user consent.
 
 ```js
 import {createDiem} from './diem.js';
@@ -20,7 +20,7 @@ Bytes are arrays of integers from 0 to 255; the adapter also accepts `Uint8Array
 Each asynchronous operation retains its own crypto backend.
 
 - `identityOperation` manages hosted `user`, `channel`, `bot` and `stickerSet`
-  identities. Specify `kind` and an operation: `create`, `inspect`, `renew`,
+  identities. Specify `kind` and an operation: `create`, `enroll`, `inspect`, `renew`,
   `account`, `home`, `domains`, `addDevice`, `removeDevice` or `prove`. Native profile rules validate
   names, account numbers, homes and devices. `profileLifetime` and `deviceLifetime`
   are positive integer seconds, defaulting to 180 days. Profile lifetime must not
@@ -47,10 +47,14 @@ itself as account 777000. DC creation uses `dcSetup`; changing its account or ho
 - `dcSetup` creates a DC identity or renews an existing one. `data` holds the DC
   profile fields as a CBOR map, as signed in the Diem profile content: the discovery
   domains at key 9 and the DC fields from key 16 (`DCProfile` owns the keys).
-  It returns the signed public profile and the operator device's certificate validity
-  (`notBefore` and `expiresAt`, Unix seconds). No server device is created or certified.
-  Pass `profile: null` to create, or the existing profile to renew. Only the public
-  signed profile is uploaded; identity and device private keys remain in the browser.
+  It returns the signed public profile and its expiry (`expiresAt`, Unix seconds).
+  The operator certificate's `notBefore` and `expiresAt` are in
+  `devices.find(device => device.current)`. No server device is created or certified.
+  Pass `seed` (32 entropy bytes) and `device` from `deviceKeys.generate()`.
+  Omit `profile` to create, or pass the existing profile to renew. Renewal enrolls the
+  provided fresh device and optionally prunes the device IDs in `removeDevices`.
+  Only the public signed profile is uploaded. The ephemeral setup device is forgotten
+  after publication; subsequent renewal derives the identity from recovery words.
   `profileLifetime` and `deviceLifetime` are positive integer seconds, both defaulting
   to 90 days. The requested profile lifetime must not exceed the certificate lifetime.
 - `verifyDCProfile` verifies a public DC profile’s certificates, signature, validity,
@@ -113,98 +117,98 @@ redirects, omits credentials and referrers, disables caching and caps streamed r
 Host refusals have `type: 'hostingProblem'`, wire `code`, `status`, `detail`, `labels` and
 nullable `retryAfter` seconds. Client failures have a stable `type`; see `diem.d.ts`.
 
-## Key files
+## Recovery words and custody
 
-`keyFiles.create(password)` returns an unlocked custody session. `session.seal(contents)`
-produces a binary CBOR file; `keyFiles.unlock(bytes, password)` verifies and opens a file,
-returning `{session, contents}`. `session.open(bytes)` and `session.seal(contents)` reuse
-the unlocked recipient without retaining the password or repeating PBKDF2. Call
-`session.destroy()` when locking or discarding a session. In-flight operations must finish
-before the application considers its custody locked. `keyFiles.inspect(bytes)` returns
-unverified display identity and salt only; it never grants authority.
+`seeds.generate()` returns `{words, entropy}`: 24 BIP 39 English recovery words and their
+32-byte root. `seeds.restore(phrase)` returns the entropy, ignoring ASCII case and
+whitespace and rejecting unknown words, a bad word count or checksum.
+`seeds.words(entropy)` shows those words again. Words are the only backup; applications
+show and verify them during creation and require device authentication or an explicit
+confirmation before showing them again.
 
-Use `generateSigningKey()` for browser Ed25519 keys. Contents include the signed profile
-and identity and/or device keys; `diem.d.ts` owns the browser shape. Recovery files can
-contain only an identity key, device files only a device key, and browser backups both.
-Optional `hosting: {domain, held, proofs}` contents carry claim routing and public proof
-nonces with a backup. Domains and labels must be canonical lowercase DNS names, with at
-most 16 distinct labels across held names and proofs, and 1–64 bytes per nonce.
-The encrypted metadata map stores this at integer key 7 as `{0: domain, 1: held,
-2: [[label, nonceBytes], …]}`. In-flight `pending` bytes are never included. This remains
-version one: older native readers preserve arbitrary metadata; older browser readers
-ignore key 7 on open (and drop it if resealed). Files without it still open.
-The native `KeyFile` contract defines the CBOR and password/HPKE rules. Recovery files
-are portable between native clients, Chromium and Safari, including existing files.
-The bundled `@hpke/core` implementation uses WebCrypto; `@noble/curves` supplies the
-P-256 public point for Safari-compatible private-key imports. No external scripts are requested.
-Downloads use `.cbor` and `application/cbor`. JSON files are rejected.
+`await seeds.identity(entropy, identityPublicKey?)` derives Ed25519 with WebCrypto HKDF-SHA256, optionally
+checks the expected Diem identity encoding, then returns `{publicKey, id, signer}`.
+`publicKey` is Diem's encoded identity key, `id` is its lowercase hex digest, and `signer`
+is a non-extractable Ed25519 CryptoKey. The word codec and public-key computation run in
+JavaScript; entropy never enters the client's WASM instance. Intermediate buffers are cleared. Callers
+clear entropy buffers when their operation ends.
 
-## Paper device keys
+`await deviceKeys.generate()` returns `{privateKey, publicKey}`. The private CryptoKey
+is generated as ECDSA P-256 with `extractable:false` and `usages:['sign']`; the public
+key is raw 65-byte SEC1. Persist the CryptoKey object in IndexedDB by structured clone.
+Never export or serialize device private keys. A device key serves exactly one session.
+WebCrypto custody is `KeyProtection.nonExportable`, without a hardware guarantee.
 
-`paperKeys.generate()` returns a new paper device key: its 24-word `phrase`, the derived
-Ed25519 signing `key` and the encoded Diem `device` public key. Show the phrase once and
-certify `device` with `addDevice`. `paperKeys.restore(phrase)` ignores case and spacing and
-rejects unknown words, a wrong word count or a failed checksum. A restored paper is an
-ordinary device: it signs in only while the identity's current profile lists it and cannot
-manage devices. Diem's `PaperDeviceKey` owns the words and derivation.
+Store each account slot's seed encrypted with AES-GCM under a separate non-extractable
+CryptoKey kept in IndexedDB. Use a new 12-byte random IV for each encryption. Applications
+own storage transactions, local deletion, optional app passcode locking and user consent.
+Logout deletes that slot's device CryptoKey and encrypted seed. Discard replaced custody
+and log out accounts bound to it; there is no legacy decoding or migration.
+
+The `identityOperation` callbacks return raw Ed25519 identity public bytes (32 bytes)
+and SEC1 P-256 device public bytes (65 bytes). Sign identity messages with Ed25519 and
+device messages with `subtle.sign({name:'ECDSA',hash:'SHA-256'}, privateKey, message)`.
+The device signature is the WebCrypto fixed-width 64-byte r‖s result. Verification
+callbacks choose the algorithm from the public-key length. A device-only backend returns
+an empty identity public key. Each operation retains its own callbacks.
+
+```js
+const {words, entropy} = diem.seeds.generate();
+const identity = await diem.seeds.identity(entropy);
+const device = await diem.deviceKeys.generate();
+const backend = {
+  random: n => crypto.getRandomValues(new Uint8Array(n)),
+  publicKey: role => role === 'identity' ? identity.publicKey.slice(-32) : device.publicKey,
+  sign: async(role, bytes) => new Uint8Array(await crypto.subtle.sign(
+    role === 'identity' ? 'Ed25519' : {name:'ECDSA', hash:'SHA-256'},
+    role === 'identity' ? identity.signer : device.privateKey, new Uint8Array(bytes))),
+  verify: verifyRawPublicKey
+};
+```
+
+Recovery-word sign-in fetches the current trusted profile, checks it with `verifyProfile`,
+derives `seeds.identity(entropy, expectedIdentityPublicKey)`, generates a fresh device,
+and uses `identityOperation` with `operation:'enroll'`. Enrollment verifies the existing
+profile and identity, preserves its devices and signed revision chain, and certifies the
+fresh device. Persist custody and publish the returned revision before proving login.
 
 ## QR device linking
 
 `deviceLink.begin(label)` returns `{request, parameter, session}`. Send only `request`
 to the DC and put `parameter` in the QR URL's `blah` parameter. Labels are untrusted
-display text of 1–64 UTF-8 bytes. Each session creates a fresh P-256 HPKE recipient and
-an Ed25519 device key in worker/WASM memory. Window callers use an isolated worker;
-callers already in a dedicated or shared worker keep the session in that worker.
-Call `session.destroy()` on cancellation. Vendor `device-link-worker.js` beside `diem.js`
-and allow that same-origin module worker in the application's content security policy.
+1–64 UTF-8 bytes. Each session generates a non-extractable P-256 device and an ephemeral
+P-256 HPKE recipient. Window and dedicated-worker callers use a disposable module worker
+for each link session and approval. SharedWorker cannot spawn a worker; it uses a separate
+WASM instance whose full linear memory is wiped before release, after any in-flight operation
+settles. Plaintext transfer seeds never enter the client's long-lived WASM instance.
+Vendor `device-link-worker.js` beside `diem.js` and allow module workers under the
+Content Security Policy described below. Call `session.destroy()` on cancellation.
 
-On the approving device, `deviceLink.inspect(parameter, request)` checks the digest
-before decoding, returning `{device, label, verifies}`. Before certifying `device`, check
-that `verifies` contains both the identity and approving device's signing algorithms
-(Ed25519 is code 1). Certification requires identity custody. Save the revised profile
-and publish its exact bytes through the identity's existing publisher before approving:
+The seed-holding approver calls `deviceLink.inspect(parameter, request)`, checks both
+verification algorithms (identity Ed25519 = 1, device P-256 = 2), certifies `device`,
+saves the new profile, and publishes its exact bytes before approving:
 
 ```js
-const response = await unlockedSession.respondToDeviceLink({
-  parameter, request, profile: publishedProfile, domain,
-  transferIdentity: true
+const response = await diem.deviceLink.respond({
+  code: parameter, request, profile: publishedProfile, domain,
+  seed: allowThisDeviceToApproveSignIns ? entropy : undefined,
+  metadata: allowThisDeviceToApproveSignIns ? portableSettings : undefined
 });
-```
-
-`respondToDeviceLink` uses the most recent custody file successfully opened or sealed by
-that session, and requires its profile to equal `profile`. It rechecks the digest,
-algorithms and live profile authority. The caller owns publication and consent;
-`transferIdentity` controls whether the new device can approve more devices. Optional
-`metadata` is opaque bytes, at most 16 KiB, permitted only with identity transfer. When
-omitted during transfer, the SDK includes the portable custody metadata map, excluding
-local publication state. Unknown metadata formats are ignored when installing settings.
-The original metadata bytes remain available in the opening result.
-
-The new device calls `deviceLink.open(session, response, expectedDC)`, where `expectedDC`
-is the connected DC's 32-byte identity. It returns `{profile, domain, identityKey,
-metadata?, keyFileContents}` only after verifying the current user profile, allocated
-account at that DC, listed domain, device certification and any transferred identity key.
-The session ends on success or failure. `identityKey` is a Boolean; individual private
-keys are never returned by the link API.
-
-Install custody before completing sign-in with the new device's proof:
-
-```js
 const opened = await diem.deviceLink.open(session, response, expectedDC);
-const custody = await diem.keyFiles.create(newLocalPassword);
-try {
-  const file = await custody.seal(opened.keyFileContents);
-  await saveCustody(file);
-} finally {
-  opened.keyFileContents.fill(0);
-  custody.destroy();
-}
+// opened = {profile, domain, device: {privateKey: CryptoKey, publicKey: Uint8Array},
+//           seed?: Uint8Array, metadata?: Uint8Array}
 ```
 
-`keyFileContents` uses the existing sensitive custody path and can contain the device
-key alone or both device and identity keys. A later `keyFiles.unlock` returns the usual
-signing-key shape. The QR secret never goes to the DC; the DC receives ciphertext only.
-The native record and verification contract is documented in `DeviceAuthority.md`.
+Seed transfer is opt-in; the approval toggle defaults off. Metadata is opaque application
+bytes, at most 16 KiB, allowed only with seed transfer. `respond` checks the QR digest,
+capabilities, current published authority and any transferred seed's identity binding.
+The library cannot prove remote publication; callers own publication and consent.
+`open` checks the expected DC's 32-byte identity, allocated account, listed domain,
+current device certification and optional seed binding. Success or failure ends the
+session. The returned device is a CryptoKey handle; no device secret crosses the API.
+Persist the device and optional encrypted seed before completing sign-in. The QR secret
+never goes to the DC, which receives ciphertext only. Native wire rules are in
+`DeviceAuthority.md`.
 
 ## Vendoring a release
 
@@ -216,6 +220,13 @@ tag and `manifest.json` with the checksums and source revision.
 Serve WASM as `application/wasm`. Supply an explicit WASM URL when relocating the
 assets. The `.br` and `.gz` files require the corresponding `Content-Encoding`.
 Consumers need no Swift toolchain or external runtime downloads.
+
+When the runtime is served from another origin, device linking uses a disposable
+`blob:` module worker that imports the absolute worker asset URL. Content Security
+Policy must allow `worker-src blob:` as well as the runtime origin in `script-src`
+and the WASM origin in `connect-src`; CDN assets require CORS headers. The blob URL
+is revoked after the worker responds or when it is destroyed. Same-origin workers
+and the isolated SharedWorker fallback keep their existing loading paths.
 
 ### Publish to S3
 
@@ -285,8 +296,10 @@ macOS exercises Safari's native backend and private-key import restrictions.
 override applies to each requested browser; select one engine when overriding).
 Build output is in `Web/dist/`. The build pins dependencies, generates BridgeJS
 bindings, minimizes the Embedded Swift binary and enforces artifact size limits.
-Tests check the RFC 9180 derivation vector and run real WebCrypto operations in Window,
-DedicatedWorker and SharedWorker under Chromium and WebKit. They enforce Cocoa WebKit's
-private-key import restriction even on Linux, and retain native and pre-fix browser files.
+Tests run real WebCrypto operations in Window, DedicatedWorker and SharedWorker under
+Chromium and WebKit: recovery words, non-extractable P-256 signatures, IndexedDB CryptoKey
+custody, seed transfer and native/browser HPKE interoperability. The supplied
+Linux WPE runtime can fail CryptoKey persistence or Ed25519 imports in worker scenarios;
+macOS CI checks Safari's native backend.
 The [release workflow](../.github/workflows/web-release.yml) owns CI tool installation,
 testing and packaging.

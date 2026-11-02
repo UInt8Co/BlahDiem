@@ -10,9 +10,7 @@ enum BlahTag: UInt64 {
   case accountLink = 8
   case dcAdmin = 9
   case clientNamespace = 10
-  case keyFile = 14
-  case keyFileContents = 15
-  case privateKey = 16
+  // Tags 14–16 are retired.
   case deviceLinkRequest = 17
   case deviceLinkCode = 18
   case deviceLinkGrant = 19

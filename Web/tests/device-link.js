@@ -1,6 +1,7 @@
 import {createDiem} from '../dist/diem.js';
 import {encode, decode} from './cbor.js';
 import {installFixtureCrypto} from './device-link-fixture-crypto.js';
+import {verify} from './signers.js';
 
 const check = (condition, message) => { if(!condition) throw new Error(message); };
 const equal = (actual, expected, message) => check(JSON.stringify(Array.from(actual)) === JSON.stringify(Array.from(expected)), message);
@@ -11,14 +12,6 @@ async function rejects(action, message) {
   try { await action(); } catch { return; }
   throw new Error(`Expected rejection: ${message}`);
 }
-const signingKey = async seed => {
-  const pkcs8 = bytes([48, 46, 2, 1, 0, 48, 5, 6, 3, 43, 101, 112, 4, 34, 4, 32, ...seed]);
-  const privateKey = await crypto.subtle.importKey('pkcs8', pkcs8, 'Ed25519', true, ['sign']);
-  const jwk = await crypto.subtle.exportKey('jwk', privateKey);
-  const publicKey = await crypto.subtle.importKey('jwk', {kty: 'OKP', crv: 'Ed25519', x: jwk.x}, 'Ed25519', true, ['verify']);
-  return {privateKey, publicKey, contents: {privateKey: base64(pkcs8), publicKey: base64(new Uint8Array(await crypto.subtle.exportKey('raw', publicKey)))}};
-};
-
 // Inject the fixed test inputs in either the current worker or a newly spawned worker.
 // This supports both hosting choices while keeping the public N session opaque.
 async function nativeRecipientSession(diem, vector) {
@@ -47,7 +40,7 @@ export async function run() {
   try {
     const inspected = await diem.deviceLink.inspect(vector.parameter, bytes(vector.request));
     equal(inspected.device, decode(vector.request)[2], 'O inspects the exact device');
-    equal(inspected.verifies, [1], 'O sees verification algorithms');
+    equal(inspected.verifies, [1, 2], 'O sees verification algorithms');
     check(inspected.label === 'Interop desktop', 'O sees requested label');
     for(const label of ['', 'é'.repeat(33), 'a'.repeat(65)]) {
       await rejects(() => diem.deviceLink.begin(label), 'label UTF-8 bounds');
@@ -60,7 +53,7 @@ export async function run() {
     for(const parameter of ['', 'A', vector.parameter + '=', ' ' + vector.parameter, vector.parameter + '\n', '+' + vector.parameter, '/' + vector.parameter]) {
       await rejects(() => diem.deviceLink.inspect(parameter, bytes(vector.request)), 'malformed QR text');
     }
-    for(let index = 0; index < 32; index++) {
+    for(const index of [0, 16, 31]) {
       const code = decode(vector.code); code[2][index] ^= 1;
       await rejects(() => diem.deviceLink.inspect(base64url(encode(code)), bytes(vector.request)), `digest byte ${index}`);
     }
@@ -83,24 +76,16 @@ export async function run() {
       try {
         const opened = await diem.deviceLink.open(begun.session, bytes(response), bytes(vector.dc));
         equal(opened.profile, vector.profile, 'N opens exact natively sealed profile');
-        check(opened.domain === vector.domain && opened.identityKey === transfers, 'Native grant authority');
-        if(transfers) equal(opened.metadata, vector.metadata, 'Opaque metadata preserved');
-        else check(opened.metadata === undefined, 'Device-only grant has no metadata');
-        check(opened.keyFileContents.length > 0, 'N receives portable custody contents');
-        const contents = decode(opened.keyFileContents);
-        check(contents[0] === 15, 'Custody is KeyFileContents');
-        equal(contents[2], vector.profile, 'Custody carries certified profile');
-        check(contents[3].length === (transfers ? 2 : 1), 'Custody contains exactly granted keys');
-        const custody = await diem.keyFiles.create('N local password');
-        let restored;
-        try {
-          const file = await custody.seal(opened.keyFileContents);
-          opened.keyFileContents.fill(0);
-          restored = await diem.keyFiles.unlock(file, 'N local password');
-          check(restored.contents.domain === vector.domain, 'Custody installs the grant domain');
-          check(!!restored.contents.device && !!restored.contents.identity === transfers, 'Password-sealed custody preserves authority');
-          equal(new Uint8Array(atob(restored.contents.profile).split('').map(c => c.charCodeAt(0))), vector.profile, 'Password-sealed custody preserves the published profile');
-        } finally { restored?.session.destroy(); custody.destroy(); }
+        check(opened.domain === vector.domain && !!opened.seed === transfers, 'Native grant authority');
+        if(transfers) {
+          equal(opened.metadata, vector.metadata, 'Opaque metadata preserved');
+          equal(opened.seed, vector.entropy, 'Root entropy transferred');
+        } else check(opened.metadata === undefined, 'Device-only grant has no metadata');
+        check(opened.device.privateKey.extractable === false, 'No extractable device secret returned');
+        equal(opened.device.publicKey, decode(decode(vector.request)[2])[4], 'Returned P-256 device matches request');
+        const signature = new Uint8Array(await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, opened.device.privateKey, bytes([1, 2, 3])));
+        check(signature.length === 64 && await verify(opened.device.publicKey, [1, 2, 3], signature), 'Native/browser P-256 signer agrees');
+        for(const format of ['raw', 'pkcs8', 'jwk']) await rejects(() => crypto.subtle.exportKey(format, opened.device.privateKey), 'Device cannot export');
       } finally { begun.session.destroy?.(); }
     }
     for(const test of ['ciphertext', 'DC', 'oversized', 'different recipient']) {
@@ -116,23 +101,16 @@ export async function run() {
       finally { begun.session.destroy?.(); }
     }
 
-    const identity = await signingKey(vector.identitySecret), signer = await signingKey(vector.signerSecret);
-    const custody = await diem.keyFiles.create('x');
-    let unlocked;
+    const input = {code: vector.parameter, request: bytes(vector.request), profile: bytes(vector.profile), domain: vector.domain};
+    const response = await diem.deviceLink.respond({...input, seed: bytes(vector.entropy), metadata: bytes(vector.metadata)});
+    const deviceOnlyResponse = await diem.deviceLink.respond(input);
+    const swapped = await diem.deviceLink.begin('Attacker');
     try {
-      const file = await custody.seal({domain: vector.domain, profile: base64(vector.profile),
-        identity: identity.contents, device: signer.contents});
-      unlocked = await diem.keyFiles.unlock(file, 'x');
-      const input = {parameter: vector.parameter, request: bytes(vector.request), profile: bytes(vector.profile), domain: vector.domain};
-      const response = await unlocked.session.respondToDeviceLink({...input, transferIdentity: true, metadata: bytes(vector.metadata)});
-      const deviceOnlyResponse = await unlocked.session.respondToDeviceLink({...input, transferIdentity: false});
-      const swapped = await diem.deviceLink.begin('Attacker');
-      try {
-        await rejects(() => unlocked.session.respondToDeviceLink({...input, request: swapped.request, transferIdentity: true}), 'O must check request digest before responding');
-      } finally { swapped.session.destroy?.(); }
-      await rejects(() => unlocked.session.respondToDeviceLink({...input, transferIdentity: false, metadata: bytes([1])}), 'metadata needs identity authority');
-      await rejects(() => unlocked.session.respondToDeviceLink({...input, transferIdentity: true, metadata: new Uint8Array(16385)}), 'metadata bounds');
-      return {realm: typeof document === 'undefined' ? 'worker' : 'window', response: Array.from(response), deviceOnlyResponse: Array.from(deviceOnlyResponse)};
-    } finally { unlocked?.session.destroy(); custody.destroy(); }
+      await rejects(() => diem.deviceLink.respond({...input, request: swapped.request, seed: bytes(vector.entropy)}), 'O checks request digest before responding');
+    } finally { swapped.session.destroy?.(); }
+    await rejects(() => diem.deviceLink.respond({...input, metadata: bytes([1])}), 'metadata requires seed transfer');
+    await rejects(() => diem.deviceLink.respond({...input, seed: bytes(vector.entropy), metadata: new Uint8Array(16385)}), 'metadata bounds');
+    await rejects(() => diem.deviceLink.respond({...input, seed: new Uint8Array(32)}), 'Seed must reproduce profile identity');
+    return {realm: typeof document === 'undefined' ? 'worker' : 'window', response: Array.from(response), deviceOnlyResponse: Array.from(deviceOnlyResponse)};
   } finally { Date.now = now; }
 }

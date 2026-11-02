@@ -11,9 +11,10 @@ outlive its signing certificate. DC browser setup defaults both to 90 days and l
 operator choose each period. Ordinary identity creation retains Diem's one-day profile
 and 30-day certificate defaults.
 
-The identity key stays on the devices that manage the device set. It moves between them
-as a `SealedIdentityKey`, sealed to the receiving device's encryption key, and is
-stored the same way, sealed to a key the device holds.
+An identity derives from an `IdentitySeed`: 32 entropy bytes shown as 24 recovery words.
+Seed holders derive the identity key to manage devices. The seed moves between holders
+as a `SealedIdentitySeed`, encrypted to the receiving device's encryption key. Applications
+store it encrypted at rest. Recovery words are the only backup.
 
 ## Keys
 
@@ -22,38 +23,16 @@ profile content and every Blah proof; an encryption key receives HPKE-sealed sec
 A DC's ``DCProfile/transportPublicKey`` is a separate RSA key for MTProto key exchange,
 never a Diem key, and is not post-quantum.
 
-New identities use ML-DSA-65 keys, and device-addressed identity transfer defaults to
-X-Wing unless the caller chooses otherwise. The browser runtime creates Ed25519
-software keys and verifies Ed25519 and P-256 profiles.
-
-## Password-protected key files
-
-``KeyFile`` is the common canonical-CBOR storage and export format for browser custody,
-DC setup and native file recovery. ``KeyFileContents`` holds the signed profile, one
-identity key, one listed device key, or both, and an encrypted application metadata map.
-The key roles remain distinct: a device-only file grants no recovery authority. A Diem
-`PaperDeviceKey` is a listed software device written as 24 words; custody that keeps it
-uses a device-only file. Native
-hardware device keys stay on their device; native recovery exports the software identity
-key and enrolls a new hardware device when restored.
-
-Version one uses exact UTF-8 password bytes, a random 16-byte salt and
-PBKDF2-HMAC-SHA256 with 600,000 iterations to produce the input to RFC 9180's P-256
-`DeriveKeyPair`. The resulting recipient opens Diem's P-256/HKDF-SHA256/AES-256-GCM
-base-mode HPKE box. The entire header, including extensions, is both HPKE info and
-associated data. Passwords must be nonempty; there are no other length or complexity
-requirements. Neither passwords nor recipient private keys are stored in the file.
-
-The file authenticates its identity, key purposes and signed profile, and checks that
-private keys reproduce the declared public keys. Restoring an expired signed profile is
-allowed for recovery; current published authority is still required for authentication.
-File decoding and KDF work are bounded. JSON files are not accepted. Field numbers,
-size limits and the native API belong to ``KeyFile`` and ``KeyFileContents``; the web
-adapter and custody session API are described in the web package's README.
+Diem's generic signing default remains ML-DSA-65. Blah clients explicitly derive Ed25519
+identities and generate P-256 devices: Secure Enclave on iOS, non-extractable WebCrypto
+on the web. WebCrypto keys use `KeyProtection.nonExportable`, which makes no hardware
+guarantee. Device private keys are never exported or transferred. Applications persist
+platform key references or CryptoKey objects. Each device key serves one session.
+Wire tags 14–16 are retired and never reused.
 
 ## Linking another device
 
-The new device creates an Ed25519 signing key and a fresh P-256 encryption key. Its
+The new device creates a non-exportable P-256 signing key and a fresh P-256 encryption key. Its
 ``DeviceLinkRequest`` goes to the DC; its ``DeviceLinkCode`` travels only in the QR
 code's `blah` parameter. The approving device checks `DeviceLinkCode.matches(_:)`
 against the received bytes before decoding the request, then checks that the new
@@ -67,16 +46,17 @@ publisher before sending a response. The DC learns the revision through its norm
 profile fetch, independently of profile hosting. Linking cannot allocate an account.
 
 ``DeviceLinkGrant`` carries those exact published bytes, a listed domain, and optionally
-a Diem `SealedIdentityKey` for the new device. Opaque application metadata is allowed only
-with identity custody, and carries no authority. ``DeviceLinkContext`` binds the response
+a Diem `SealedIdentitySeed` at key 4 for the new device. Opaque application metadata is allowed only
+with seed transfer, and carries no authority. ``DeviceLinkContext`` binds the response
 to the request digest and QR secret as both HPKE info and associated data. The secret
 never goes to the DC. Opening requires a live user profile, an active home at the expected
 DC with an allocated account, a listed domain, and certification of the requested device
-in the current generation. Transferred identity custody must open to the profile's key.
+in the current generation. Opening re-derives the profile's identity from the transferred seed.
 
 Any opening failure ends the link session. After success the caller stores custody
 before completing sign-in with a proof from the new device. Account password checks still
-apply. The web package's README describes its opaque session and custody API.
+apply. `DeviceLinkResponse.Opened.seed` is optional; the device key stays in its platform store.
+The web package's README describes its opaque session and custody API.
 
 ## Profiles
 

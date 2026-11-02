@@ -1,10 +1,11 @@
 // BridgeJS generates both sides of the ABI; this adapter only normalizes JS inputs.
 import {init} from './.build-embedded/plugins/PackageToJS/outputs/Package/index.js';
 import {hosting} from './hosting.js';
-import {keyFiles, paperKeys, generateSigningKey, linkBackend} from './key-files.js';
+import {deviceKeys, signingBackend} from './crypto-support.js';
+import {seeds} from './seeds.js';
 import {deviceLink} from './device-links.js';
 
-const operations = new Set(['create', 'inspect', 'renew', 'account', 'home', 'domains', 'addDevice', 'removeDevice', 'prove']);
+const operations = new Set(['create', 'enroll', 'inspect', 'renew', 'account', 'home', 'domains', 'addDevice', 'removeDevice', 'prove']);
 const kinds = new Set(['user', 'channel', 'bot', 'stickerSet', 'dc']);
 const challengeKinds = new Set(['invocation', 'login', 'oauthConsent', 'accountLink', 'dcAdmin']);
 const optional = ['account', 'device', 'challenge', 'query', 'keyID', 'sessionID', 'expiresAt', 'challengeKind', 'approvedChallenge', 'domains'];
@@ -28,12 +29,12 @@ function validTime(value) { return Number.isSafeInteger(value) && value >= 0; }
 /** Works in Window, DedicatedWorker and SharedWorker; no DOM or global callbacks. */
 export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.url)) {
   const {exports} = await init({module: fetch(wasmURL), getImports: () => ({})});
+  const seedAPI = seeds();
   return {
+    seeds: seedAPI,
+    deviceKeys,
     hosting: hosting(exports, bytes),
-    keyFiles: keyFiles(exports),
-    deviceLink: deviceLink(exports, wasmURL, linkBackend),
-    paperKeys: paperKeys(exports),
-    generateSigningKey,
+    deviceLink: deviceLink(exports, wasmURL),
     async identityOperation(input, crypto) {
       if(!operations.has(input?.operation) || !kinds.has(input.kind) || typeof input.domain !== 'string' || input.domain.length > 253 ||
         typeof input.dcDomain !== 'string' || input.dcDomain.length > 253 ||
@@ -67,12 +68,15 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
       }
       return exports.identityOperation(request, backend(crypto));
     },
-    async dcSetup(input, crypto) {
+    async dcSetup(input) {
       if(!validTime(input?.now)) throw new TypeError('Invalid DC setup time');
+      const identity = await seedAPI.identity(input.seed);
       return exports.dcSetup({data: bytes(input.data, 'data'),
         profile: input.profile == null ? null : bytes(input.profile, 'profile'), now: input.now,
         profileLifetime: input.profileLifetime ?? 90 * 86400,
-        deviceLifetime: input.deviceLifetime ?? 90 * 86400}, backend(crypto));
+        deviceLifetime: input.deviceLifetime ?? 90 * 86400,
+        removeDevices: (input.removeDevices ?? []).map(value => bytes(value, 'device ID', 32))},
+        signingBackend(identity, input.device));
     },
     async verifyProfile(encoding, now, crypto) {
       if(!validTime(now) || typeof crypto?.verify !== 'function') {

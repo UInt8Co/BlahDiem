@@ -145,7 +145,7 @@ public struct DeviceLinkGrant: Sendable {
   public static let cborKeyVersion: UInt64 = 1
   public static let cborKeyProfile: UInt64 = 2
   public static let cborKeyDomain: UInt64 = 3
-  public static let cborKeyIdentityKey: UInt64 = 4
+  public static let cborKeySeed: UInt64 = 4
   public static let cborKeyMetadata: UInt64 = 5
   public static let maximumBytes = 65_536
   public static let maximumMetadataBytes = 16_384
@@ -153,22 +153,22 @@ public struct DeviceLinkGrant: Sendable {
   /// The exact signed profile bytes published by the approving device.
   public let profile: [UInt8]
   public let domain: DomainName
-  public let identityKey: SealedIdentityKey?
+  public let seed: SealedIdentitySeed?
   public let metadata: [UInt8]?
   private var extensions: [UInt64: CBOR] = [:]
 
-  public init(profile: [UInt8], domain: DomainName, identityKey: SealedIdentityKey? = nil,
+  public init(profile: [UInt8], domain: DomainName, seed: SealedIdentitySeed? = nil,
     metadata: [UInt8]? = nil) throws {
-    guard metadata == nil || identityKey != nil,
+    guard metadata == nil || seed != nil,
       (metadata?.count ?? 0) <= Self.maximumMetadataBytes else { throw BlahError.invalidDeviceLink }
     _ = try AnyBlahProfile(encoding: profile)
-    self.profile = profile; self.domain = domain; self.identityKey = identityKey; self.metadata = metadata
+    self.profile = profile; self.domain = domain; self.seed = seed; self.metadata = metadata
     guard encoding.count <= Self.maximumBytes else { throw BlahError.invalidDeviceLink }
   }
 
-  public init(profile: AnyBlahProfile, domain: DomainName, identityKey: SealedIdentityKey? = nil,
+  public init(profile: AnyBlahProfile, domain: DomainName, seed: SealedIdentitySeed? = nil,
     metadata: [UInt8]? = nil) throws {
-    try self.init(profile: profile.encoding, domain: domain, identityKey: identityKey, metadata: metadata)
+    try self.init(profile: profile.encoding, domain: domain, seed: seed, metadata: metadata)
   }
 
   public init(encoding: [UInt8]) throws {
@@ -176,7 +176,7 @@ public struct DeviceLinkGrant: Sendable {
     let fields = try CBOR.record(encoding, tag: .deviceLinkGrant, requiredKeys: 0..<4, error: .invalidDeviceLink)
     try self.init(profile: fields[2]!.bytesValue(),
       domain: DomainName(fields[3]!.textValue()),
-      identityKey: fields[4].map { try SealedIdentityKey(encoding: $0.bytesValue()) },
+      seed: fields[4].map { try SealedIdentitySeed(encoding: $0.bytesValue()) },
       metadata: fields[5].map { try $0.bytesValue() })
     extensions = fields.filter { $0.key > Self.cborKeyMetadata }
   }
@@ -184,7 +184,7 @@ public struct DeviceLinkGrant: Sendable {
   public var encoding: [UInt8] {
     var fields: [UInt64: CBOR] = [0: .unsigned(BlahTag.deviceLinkGrant.rawValue), 1: .unsigned(1),
       2: .bytes(profile), 3: .text(domain.name)]
-    if let identityKey { fields[4] = .bytes(identityKey.encoding) }
+    if let seed { fields[4] = .bytes(seed.encoding) }
     if let metadata { fields[5] = .bytes(metadata) }
     return CBOR.record(fields, extensions: extensions).encoded
   }
@@ -203,9 +203,9 @@ public struct DeviceLinkGrant: Sendable {
       $0.device == request.device && $0.generation == profile.generation && $0.validity.contains(time)
     }) else { throw DiemError.deviceNotListed }
     try request.requireCompatible(identityKey: profile.identityKey, device: profile.record.signer)
-    if let identityKey {
-      guard identityKey.identityKey == profile.identityKey,
-        identityKey.recipient == request.recipient else { throw DiemError.identityMismatch }
+    if let seed {
+      guard seed.identityKey == profile.identityKey,
+        seed.recipient == request.recipient else { throw DiemError.identityMismatch }
     }
   }
 }
@@ -220,7 +220,7 @@ public enum DeviceLinkResponse {
   public struct Opened: Sendable {
     public let grant: DeviceLinkGrant
     public let profile: AnyBlahProfile
-    public let identityKey: IdentityPrivateKey?
+    public let seed: IdentitySeed?
   }
 
   public static func seal(_ grant: DeviceLinkGrant, for request: DeviceLinkRequest,
@@ -251,9 +251,8 @@ public enum DeviceLinkResponse {
     let grant = try DeviceLinkGrant(encoding: plaintext)
     try await grant.verify(for: request, expectedDC: expectedDC, at: time, using: backend)
     let profile = try AnyBlahProfile(encoding: grant.profile)
-    let key = try await grant.identityKey?.open(with: recipientKey, using: backend)
-    guard key == nil || key?.publicKey == profile.identityKey else { throw DiemError.identityMismatch }
-    return Opened(grant: grant, profile: profile, identityKey: key)
+    let seed = try await grant.seed?.open(with: recipientKey, using: backend)
+    return Opened(grant: grant, profile: profile, seed: seed)
   }
 }
 

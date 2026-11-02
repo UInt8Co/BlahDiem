@@ -165,8 +165,8 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
 
   const dcData = encode({9: ['dc.example.org'], 16: 5, 18: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
     19: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 20: 'transport-public-key', 21: 1});
-  const input = {data: dcData, profile: null, now: base.now};
-  const created = await diem.dcSetup(input, alice);
+  const input = {data: dcData, profile: null, seed: alice.seed, device: alice.device, now: base.now};
+  const created = await diem.dcSetup(input);
   check(content(created.profile)[16] === 5 && created.devices.length === 1, 'DC creation without a server device');
   const dcRequest = {...base, kind: 'user', domain: 'dc.example.org', dcDomain: 'dc.example.org',
     dc: fromHex(created.id), profile: created.profile};
@@ -221,8 +221,38 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const changed = [...created.profile]; changed[changed.length - 1] ^= 1;
   await rejects(() => diem.verifyDCProfile('dc.example.org', changed, base.now, {verify: alice.verify}));
   const renewed = await diem.dcSetup({...input, profile: created.profile, now: base.now + 91 * 86400,
-    profileLifetime: 45 * 86400, deviceLifetime: 120 * 86400}, alice);
+    profileLifetime: 45 * 86400, deviceLifetime: 120 * 86400});
   check(renewed.id === created.id && renewed.expiresAt > created.expiresAt && renewed.devices.length === 1, 'Expired DC recovery');
+  const freshDevice = await diem.deviceKeys.generate();
+  const fresh = await diem.dcSetup({...input, device: freshDevice, profile: created.profile,
+    now: base.now + 10, removeDevices: [fromHex(created.devices[0].id)]});
+  check(fresh.devices.length === 1 && fresh.devices[0].id !== created.devices[0].id && fresh.id === created.id,
+    'DC renewal enrolls a fresh device and prunes stale setup authority');
+  check(content(fresh.profile)[3] === content(created.profile)[3] + 1 &&
+    content(fresh.profile)[5] === content(created.profile)[5] + 1 &&
+    equal(content(fresh.profile)[6], new Uint8Array(await crypto.subtle.digest('SHA-256', decode(decode(created.profile)[4])[0]))),
+    'DC revocation advances generation and preserves the revision chain');
+  const full = decode(created.profile), template = decode(decode(full[3][0])[0]);
+  // One capacity fixture, rather than publishing every intermediate device count.
+  for(let count = 1; count < 128; count++) {
+    const device = await diem.deviceKeys.generate();
+    const key = bytes(encode({0: 'Diem/key', 1: 3, 2: 2, 3: 2, 4: device.publicKey}));
+    const message = bytes(encode({...template, 4: key}));
+    full[3].push(bytes(encode({0: message, 1: await alice.sign('identity', message)})));
+  }
+  const fullProfile = encode(full);
+  await publicInfo(fullProfile);
+  const atCapacity = await diem.dcSetup({...input, profile: fullProfile, device: freshDevice,
+    now: base.now + 10, removeDevices: [fromHex(created.devices[0].id)]});
+  check(atCapacity.devices.length === 128 && atCapacity.devices.some(device => device.current) &&
+    !atCapacity.devices.some(device => device.id === created.devices[0].id), 'DC renewal prunes before adding at 128 devices');
+  check(content(atCapacity.profile)[3] === 2 && content(atCapacity.profile)[5] === 2 &&
+    equal(content(atCapacity.profile)[6], content(fresh.profile)[6]), 'Capacity renewal preserves generation and revision chain');
+  await publicInfo(atCapacity.profile, base.now + 10);
+  const freshID = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes(encode({0: 'Diem/key', 1: 3, 2: 2, 3: 2, 4: freshDevice.publicKey}))));
+  await rejectsWith(() => diem.dcSetup({...input, profile: fullProfile, device: freshDevice,
+    removeDevices: [freshID]}), 'identityMismatch');
+  await rejectsWith(() => diem.dcSetup({...input, profile: fullProfile, device: freshDevice}), 'invalidEncoding');
   check(equal(encode(fields(renewed.profile)), dcData), 'DC fields survive renewal');
   check(renewed.expiresAt === base.now + (91 + 45) * 86400, 'Chosen DC profile lifetime');
   check(renewed.devices[0].expiresAt === base.now + (91 + 120) * 86400, 'Chosen DC certificate lifetime');
@@ -230,14 +260,14 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     {profileLifetime: 0}, {deviceLifetime: 0}, {profileLifetime: -1}, {deviceLifetime: 1.5},
     {profileLifetime: 121 * 86400, deviceLifetime: 120 * 86400},
     {deviceLifetime: Number.MAX_SAFE_INTEGER}
-  ]) await rejects(() => diem.dcSetup({...input, ...lifetimes}, alice));
-  await rejects(() => diem.dcSetup({...input, profile: first.profile}, alice));
-  await rejects(() => diem.dcSetup({...input, data: encode(fields(first.profile))}, alice));
-  await rejects(() => diem.dcSetup({...input, data: encode({...fields(created.profile), 10: null})}, alice));
-  await rejects(() => diem.dcSetup({...input, data: new Array(10)}, alice));
-  await rejects(() => diem.dcSetup({...input, now: 1.5}, alice));
+  ]) await rejects(() => diem.dcSetup({...input, ...lifetimes}));
+  await rejects(() => diem.dcSetup({...input, profile: first.profile}));
+  await rejects(() => diem.dcSetup({...input, data: encode(fields(first.profile))}));
+  await rejects(() => diem.dcSetup({...input, data: encode({...fields(created.profile), 10: null})}));
+  await rejects(() => diem.dcSetup({...input, data: new Array(10)}));
+  await rejects(() => diem.dcSetup({...input, now: 1.5}));
   const wrongSigner = await backend();
-  await rejects(() => diem.dcSetup({...input, profile: created.profile}, wrongSigner));
+  await rejects(() => diem.dcSetup({...input, seed: wrongSigner.seed, profile: created.profile}));
   const corrupt = [...created.profile]; corrupt[corrupt.length - 1] ^= 1;
-  await rejects(() => diem.dcSetup({...input, profile: corrupt}, alice));
+  await rejects(() => diem.dcSetup({...input, profile: corrupt}));
 }
