@@ -44,7 +44,7 @@ export type HostingTransport = (request: HostingHTTPRequest) => Promise<HostingH
 export interface HostingPuzzle {label: string; input: number[]; requiredBits: number}
 export type HostingSolver = (puzzle: HostingPuzzle) => Promise<Uint8Array | number[]>;
 
-/** A string targets a child label; {apex: true} targets the hosting domain itself. */
+/** A DNS label targets a child; "@" (canonical) or {apex: true} targets the apex. */
 export type HostingTarget = string | {apex: true};
 export interface HostingPolicy {
   domain: string; apex: boolean;
@@ -64,10 +64,6 @@ export interface HostingPlanName {
   requiredBits: number | null;
   /** Set for needsProof with requiredBits > 0. */
   puzzle: HostingPuzzle | null;
-}
-/** Apex planning checks policy support only; PUT decides ownership. No proof is needed. */
-export interface HostingPlanApex {
-  apex: true; status: 'available' | 'unsupported'; requiredBits: null; puzzle: null;
 }
 export interface HostingPublished {identity: string; revision: string; domains: string[]}
 
@@ -117,11 +113,12 @@ export interface DiemClient {
     fetchTransport(options?: {signal?: AbortSignal; timeout?: number}): HostingTransport;
     policy(domain: string, transport?: HostingTransport): Promise<HostingPolicy>;
     /** `identity` is the lowercase hex identity ID (ProfileInfo.id). Ownership of claimed
-     * names is a hint from the name's current profile; the host decides at publication. */
+     * names is a hint from the name's current profile; the host decides at publication.
+     * Include "@" in labels for the apex; its difficulty must be supplied by the host. */
     plan(domain: string, labels: string[], identity: string,
       transport?: HostingTransport): Promise<HostingPlanName[]>;
     plan(domain: string, target: {apex: true}, identity: string,
-      transport?: HostingTransport): Promise<HostingPlanApex[]>;
+      transport?: HostingTransport): Promise<HostingPlanName[]>;
     /** GET the child or apex profile bytes; null on 404. Does not verify signatures. */
     profile(domain: string, target: HostingTarget, transport?: HostingTransport): Promise<number[] | null>;
     /** Built-in single-threaded solver (@noble/hashes SHA-256 with a cloned prefix state,
@@ -131,11 +128,11 @@ export interface DiemClient {
     solve(puzzle: HostingPuzzle, options?: {signal?: AbortSignal; start?: number;
       stride?: number; onProgress?: (attempts: number) => void}): Promise<number[]>;
     /** PUT the exact signed bytes. `via` defaults to the first direct child in signed
-     * order, then a listed apex. A string selects a child (including a formerly held
-     * name for release); {apex: true} selects https://<domain>/.well-known/diem/profile.cbor
-     * and requires the profile to list <domain>. Apex never sends proofs or invokes the
-     * solver. Child proofs map labels to nonce bytes; a solver answers one proof-required
-     * refusal and retries once. Retry an unanswered PUT with the same saved bytes. */
+     * order, then a listed apex. "@" or {apex: true} selects
+     * https://<domain>/.well-known/diem/profile.cbor. A string can also select a formerly
+     * held name for release. Proofs map wire labels (including "@") to nonce bytes;
+     * a solver answers one proof-required refusal and retries once.
+     * Retry an unanswered PUT with the same saved bytes. */
     publish(domain: string, profile: Uint8Array | number[], options?: {via?: HostingTarget;
       proofs?: Record<string, number[]>; solver?: HostingSolver;
       transport?: HostingTransport}): Promise<HostingPublished>;

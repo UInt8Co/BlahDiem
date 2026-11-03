@@ -11,6 +11,7 @@ import Testing
     #expect(policy.apex && !policy.servesChildNames)
     #expect(policy.names == nil)
     #expect(policy.requiredBits(for: "alice") == nil)
+    #expect(policy.requiredBits(for: "@") == nil)
     #expect(throws: ProfileHostingError.invalidResponse) {
       try HostingPolicy(json: HostingTestHost.json(["domain": domain.name, "apex": true,
         "labelPattern": "[a-z]+"]).body, domain: domain)
@@ -23,19 +24,27 @@ import Testing
     let identity = try await BasicIdentity<AnyBlahProfile>(.user(.init(home: Fixture.home(), domains: [domain])), using: backend)
     let publication = HostingPublication(profile: identity.profile, via: HostingTarget.apex)
     #expect(publication.via == .apex)
+    let plan = try await host.plan(labels: ["@"], identity: identity.id)
+    #expect(plan.names.map(\.status) == [.needsProof(requiredBits: 4)])
+    #expect(await transport.requests.last?.url == "https://id.example/.well-known/diem/hosting/names/@")
     try await host.publish(publication, solver: PortableProofOfWorkSolver())
     #expect(try await host.profile(at: .apex) == identity.profile.encoding)
     let mixed = try await identity.updating(identity.profile.content.replacingDomains([domain, DomainName("alice.id.example")]))
     try await host.publish(mixed)
-    try await host.publish(mixed, via: .apex, proofs: ["alice": [1]], solver: PortableProofOfWorkSolver())
+    try await host.publish(mixed, via: .apex, proofs: ["@": [2], "alice": [1]], solver: PortableProofOfWorkSolver())
     let requests = await transport.requests
     #expect(requests.map(\.url) == [
+      "https://id.example/.well-known/diem/hosting/names/@",
+      "https://id.example/.well-known/diem/profile.cbor",
       "https://id.example/.well-known/diem/profile.cbor",
       "https://id.example/.well-known/diem/profile.cbor",
       "https://alice.id.example/.well-known/diem/profile.cbor",
       "https://id.example/.well-known/diem/profile.cbor",
     ])
-    #expect(requests.last?.headers["Diem-Hosting-Proof"] == nil)
+    #expect(requests[1].headers["Diem-Hosting-Proof"] == nil)
+    #expect(requests[2].headers["Diem-Hosting-Proof"]?.hasPrefix("@=") == true)
+    #expect(requests.last?.headers["Diem-Hosting-Proof"] == "@=Ag, alice=AQ")
+    #expect(try await host.plan(labels: ["@"], identity: identity.id).names[0].status == .held)
   }
 
   @Test func claimAndReleasePreserveHostedKinds() async throws {
@@ -117,7 +126,15 @@ private actor ApexTransport: HostingHTTPClient {
 
   func send(_ request: HostingHTTPRequest) async throws -> HostingHTTPResponse {
     requests.append(request)
+    if request.url.hasSuffix("/names/@") {
+      return HostingTestHost.json(["label": "@", "status": encoding.isEmpty ? "available" : "claimed", "requiredBits": 4])
+    }
     if request.method == .get { return .init(status: 200, body: encoding) }
+    if encoding.isEmpty && request.headers["Diem-Hosting-Proof"] == nil {
+      return HostingTestHost.json(["type": "urn:diem:profile-hosting:proof-required",
+        "title": "Proof", "detail": "Proof", "status": 403,
+        "labels": [["label": "@", "reason": "proof-required", "requiredBits": 4]]], status: 403)
+    }
     encoding = request.body ?? []
     let profile = try ProfileRecord(encoding: encoding)
     return HostingTestHost.json(["identity": HostingTestHost.base64(profile.id.bytes),

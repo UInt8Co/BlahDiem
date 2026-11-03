@@ -162,7 +162,7 @@ struct BrowserHostingSolver: ProofOfWorkSolver, @unchecked Sendable {
       guard hosted.contains(proof.label), nonces[proof.label] == nil else { throw ProfileHostingError.invalidProof(proof.label) }
       nonces[proof.label] = proof.nonce
     }
-    let target: HostingTarget? = apex ? .apex : via.map { .name($0) }
+    let target: HostingTarget? = apex ? .apex : via.map { $0 == "@" ? .apex : .name($0) }
     let publication: HostingPublication<ProfileRecord>
     if let target { publication = HostingPublication(profile: profile, proofs: nonces, via: target) }
     else { publication = HostingPublication(profile: profile, proofs: nonces) }
@@ -172,7 +172,9 @@ struct BrowserHostingSolver: ProofOfWorkSolver, @unchecked Sendable {
       try await host.publish(profile, via: target, proofs: nonces)
     } else { try await host.publish(profile, proofs: nonces) }
     let domains = profile.domains.filter { name in
-      name == host.domain || hosted.contains { name.name == $0 + "." + host.domain.name }
+      hosted.contains { label in
+        name.name == (label == "@" ? host.domain.name : label + "." + host.domain.name)
+      }
     }.map { $0.name }
     return HostingPublishedInfo(identity: profile.id.description, revision: String(profile.revision), domains: domains)
   } catch { throw hostingError(error) }
@@ -184,7 +186,7 @@ struct BrowserHostingSolver: ProofOfWorkSolver, @unchecked Sendable {
     let host = try ProfileHostingClient(domain: DomainName(domain), http: BrowserHostingHTTP(callbacks: callbacks))
     let target: HostingTarget
     if apex { target = .apex }
-    else if let label { target = .name(label) }
+    else if let label { target = label == "@" ? .apex : .name(label) }
     else { throw ProfileHostingError.invalidLabel("") }
     return try await host.profile(at: target)
   } catch { throw hostingError(error) }

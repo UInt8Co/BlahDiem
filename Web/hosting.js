@@ -12,8 +12,11 @@ function domainName(domain) {
     throw new TypeError('Invalid hosting domain');
   }
 }
+function validLabel(label) {
+  return typeof label === 'string' && (label === '@' || /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
 function labelList(labels) {
-  if(!Array.isArray(labels) || labels.length > 16 || labels.some(label => typeof label !== 'string' || label.length > 253)) {
+  if(!Array.isArray(labels) || labels.length > 16 || labels.some(label => !validLabel(label))) {
     throw new TypeError('Invalid hosting labels');
   }
 }
@@ -108,12 +111,9 @@ export function hosting(exports, bytes) {
     },
     async plan(domain, labels, identity, transport) {
       domainName(domain);
-      if(!apexTarget(labels)) labelList(labels);
+      if(apexTarget(labels)) labels = ['@'];
+      labelList(labels);
       if(typeof identity !== 'string' || !/^[0-9a-f]{64}$/.test(identity)) throw new TypeError('Invalid hosting identity');
-      if(apexTarget(labels)) {
-        const policy = await exports.hostingPolicy(domain, callbacks(transport));
-        return [{apex: true, status: policy.apex ? 'available' : 'unsupported', requiredBits: null, puzzle: null}];
-      }
       return exports.hostingPlan(domain, labels, Array.from(identity.matchAll(/../g), ([hex]) => parseInt(hex, 16)), callbacks(transport));
     },
     async profile(domain, target, transport) {
@@ -122,7 +122,7 @@ export function hosting(exports, bytes) {
     },
     async solve(puzzle, {signal, start = 0, stride = 1, onProgress} = {}) {
       signalOption(signal);
-      if(!puzzle || typeof puzzle.label !== 'string' || puzzle.label.length > 63 ||
+      if(!puzzle || !validLabel(puzzle.label) ||
         !Number.isInteger(puzzle.requiredBits) || puzzle.requiredBits < 0 || puzzle.requiredBits > 64 ||
         !Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(stride) || stride <= 0 ||
         onProgress !== undefined && typeof onProgress !== 'function') throw new TypeError('Invalid hosting puzzle');

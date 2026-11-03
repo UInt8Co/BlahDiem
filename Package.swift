@@ -8,7 +8,7 @@ let package = Package(
     .library(name: "BlahDiem", targets: ["BlahDiem"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/UInt8Co/diem.git", revision: "c0d17ec5bd2e368417bbfcd1cadbe7eac48272fe"),
+    .package(url: "https://github.com/UInt8Co/diem.git", revision: "55780087db25c771b97b7947a0419befe828ce80"),
     .package(url: "https://github.com/apple/swift-docc-plugin", exact: "1.5.0"),
   ],
   targets: [

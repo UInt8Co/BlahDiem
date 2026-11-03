@@ -5,7 +5,7 @@ let package = Package(
   name: "BlahDiemWeb",
   dependencies: [
     .package(name: "BlahDiem", path: ".."),
-    .package(url: "https://github.com/UInt8Co/diem.git", revision: "c0d17ec5bd2e368417bbfcd1cadbe7eac48272fe"),
+    .package(url: "https://github.com/UInt8Co/diem.git", revision: "55780087db25c771b97b7947a0419befe828ce80"),
     .package(url: "https://github.com/swiftwasm/JavaScriptKit.git", revision: "777848dfd70279c34f885c0c2f9e2c3fc3a45698"),
   ],
   targets: [.executableTarget(

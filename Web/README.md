@@ -100,11 +100,15 @@ An apex-only policy is `{domain: 'id.example', apex: true}`.
 `hosting.plan(domain, labels, identity, transport?)` returns `invalid`, `taken`, `held`
 or `needsProof` names, with the difficulty and puzzle for new names. Pass the lowercase
 hex identity ID. Held names are unverified discovery hints; publication decides ownership.
-`hosting.plan(domain, {apex: true}, identity, transport?)` returns one entry:
-`[{apex: true, status: 'available' | 'unsupported', requiredBits: null, puzzle: null}]`.
-This checks the apex policy capability only; the host authorizes the identity at PUT.
+Include the reserved wire label `"@"` in the label list to plan the apex, e.g.
+`hosting.plan(domain, ['@', 'alice'], identity, transport?)`. The apex entry has
+`label: '@'` and the same status/difficulty/puzzle fields as child entries. Status comes
+from `GET /.well-known/diem/hosting/names/@`; claimed status fetches the apex profile
+to distinguish `held` from `taken`. Apex work requires explicit host `requiredBits`;
+missing difficulty rejects as `unsolvable`, with no label-length fallback.
+`hosting.plan(domain, {apex: true}, identity, transport?)` is an alias for `['@']`.
 `hosting.profile(domain, labelOrApex, transport?)` fetches raw profile bytes, or `null`
-on 404. Pass a child label string or `{apex: true}`; verify the returned bytes separately.
+on 404. Pass a child label, `'@'` (canonical), or `{apex: true}`; verify bytes separately.
 
 `hosting.solve(puzzle, {signal, start, stride, onProgress}?)` searches eight-byte counters
 and yields between batches. `onProgress` reports cumulative attempts; difficulty describes
@@ -116,18 +120,23 @@ that revision before `hosting.publish(domain, profile, {proofs, solver, transpor
 Proofs map labels to nonce bytes and are sent as given for the host to check; a solver
 answers one `proof-required` refusal, its nonces checked natively, and publication retries once. Publication accepts any Diem profile kind and returns the identity in
 hex, revision as a decimal string and hosted domains in signed order. Retry an unanswered
-PUT with the same saved bytes. `via` accepts a child label string or `{apex: true}`.
+PUT with the same saved bytes. `via` accepts a child label, `'@'` (canonical), or `{apex: true}`.
 With no `via`, publication selects the first direct child in signed domain order, then a
-listed apex. Explicit apex requires the profile to list the hosting domain and PUTs to
-`https://<domain>/.well-known/diem/profile.cbor`, without a proof header or solver work.
+listed apex. An apex claim lists the hosting domain itself; explicit apex PUTs to
+`https://<domain>/.well-known/diem/profile.cbor`. Apex proofs use `proofs: {'@': nonce}`
+and `Diem-Hosting-Proof: @=<base64url nonce>`; proof-required refusals for `@` invoke
+the solver and retry once, just like child names. Puzzles bind the host, wire label `@`
+and identity. Validation accepts exactly `@` or a lowercase DNS label.
 A string can select a formerly held name for a full release; a completed full release
 may not be repeatable at that old name.
 
 ```js
 const policy = await diem.hosting.policy('id.example');
 if(policy.apex) {
-  await diem.hosting.publish('id.example', signedProfile, {via: {apex: true}});
-  const bytes = await diem.hosting.profile('id.example', {apex: true});
+  const plan = await diem.hosting.plan('id.example', ['@'], identityHex);
+  await diem.hosting.publish('id.example', signedProfile, {via: '@',
+    solver: puzzle => diem.hosting.solve(puzzle)});
+  const bytes = await diem.hosting.profile('id.example', '@');
 }
 ```
 
