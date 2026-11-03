@@ -80,7 +80,54 @@ export async function exerciseHosting({diem, check, base, alice, bob, first}) {
     }
     throw new Error(`Expected hosting rejection ${expected}`);
   };
-  check((await hosting.policy('id.example', transport)).proofOfWork.baseBits === 4, 'Hosting policy');
+  const childPolicy = await hosting.policy('id.example', transport);
+  check(!childPolicy.apex && childPolicy.names.proofOfWork.baseBits === 4, 'Child-only hosting policy');
+  const apexPolicy = await hosting.policy('id.example', async() => json({domain: 'id.example', apex: true}));
+  check(apexPolicy.apex === true && !('names' in apexPolicy) && !('labelPattern' in apexPolicy), 'Apex-only policy shape');
+  const bothPolicy = await hosting.policy('id.example', async() => json({...policy, apex: true}));
+  check(bothPolicy.apex && bothPolicy.names.maxClaimsPerIdentity === 3, 'Combined policy');
+  await reject(() => hosting.policy('id.example', async() => json({domain: 'id.example', apex: true, labelPattern: '.*'})), 'invalidResponse');
+  await reject(() => hosting.policy('id.example', async() => json({domain: 'id.example'})), 'invalidResponse');
+  const apexRequests = [];
+  let apexBytes, refuseApex = false;
+  const apexTransport = async request => {
+    apexRequests.push(request);
+    if(request.url.endsWith('/hosting')) return json({domain: 'id.example', apex: true});
+    if(request.method === 'GET') return apexBytes ? {status: 200, headers: {}, body: apexBytes} : json({}, 404);
+    if(refuseApex) return json({type: 'urn:diem:profile-hosting:proof-required', title: 'Refused', detail: 'Refused', status: 403}, 403);
+    apexBytes = request.body;
+    const content = fields(request.body);
+    return json({identity: base64(content[2]), revision: content[5], domains: content[9]});
+  };
+  check(await hosting.profile('id.example', {apex: true}, apexTransport) === null, 'Apex GET 404');
+  check((await hosting.plan('id.example', {apex: true}, first.id, apexTransport))[0].status === 'available', 'Apex plan support');
+  check((await hosting.plan('id.example', {apex: true}, first.id, transport))[0].status === 'unsupported', 'Apex plan unsupported');
+  const apexSigned = await diem.identityOperation({...base, operation: 'domains', profile: first.profile,
+    domains: ['id.example']}, alice);
+  const defaultApex = await hosting.publish('id.example', apexSigned.profile, {transport: apexTransport});
+  check(defaultApex.domains.join() === 'id.example', 'Default apex and published domains');
+  check(hex(await hosting.profile('id.example', {apex: true}, apexTransport)) === hex(apexSigned.profile), 'Apex GET bytes');
+  const mixed = await diem.identityOperation({...base, domain: 'id.example', operation: 'domains', profile: apexSigned.profile,
+    domains: ['id.example', 'alice.id.example']}, alice);
+  await hosting.publish('id.example', mixed.profile, {transport: apexTransport});
+  check(apexRequests.at(-1).url === 'https://alice.id.example/.well-known/diem/profile.cbor', 'Default prefers child over earlier apex');
+  const explicitApex = await hosting.publish('id.example', mixed.profile,
+    {via: {apex: true}, proofs: {alice: [1]}, solver: async() => { throw new Error('Apex solver invoked'); }, transport: apexTransport});
+  const apexPut = apexRequests.at(-1);
+  check(apexPut.url === 'https://id.example/.well-known/diem/profile.cbor' && !('Diem-Hosting-Proof' in apexPut.headers) &&
+    hex(apexPut.body) === hex(mixed.profile) && explicitApex.domains.join() === 'id.example,alice.id.example', 'Explicit apex URL, exact bytes, no proof');
+  refuseApex = true;
+  const beforeApexRefusal = apexRequests.length;
+  await reject(() => hosting.publish('id.example', mixed.profile,
+    {via: {apex: true}, solver: async() => { throw new Error('Apex solver invoked'); }, transport: apexTransport}), 'hostingProblem');
+  check(apexRequests.length === beforeApexRefusal + 1, 'Apex proof refusal never retries or fetches policy');
+  await reject(() => hosting.publish('id.example', first.profile, {via: {apex: true}, transport: apexTransport}), 'hostNotListed');
+  for(const invalid of [null, {apex: false}, {apex: true, label: 'alice'}, 3]) {
+    await reject(() => hosting.publish('id.example', mixed.profile, {via: invalid, transport: apexTransport}), error => error instanceof TypeError);
+    await reject(() => hosting.plan('id.example', invalid, first.id, apexTransport), error => error instanceof TypeError);
+    await reject(() => hosting.profile('id.example', invalid, apexTransport), error => error instanceof TypeError);
+  }
+  await reject(() => hosting.policy('ID.example', apexTransport), error => error instanceof TypeError);
   const plan = await hosting.plan('id.example', ['BAD', 'reserved', 'alice'], first.id, transport);
   check(plan.map(name => name.status).join() === 'invalid,invalid,needsProof', 'Plan invalid and proof statuses');
   check(plan[0].requiredBits === null && plan[0].puzzle === null && plan[2].requiredBits === 4, 'Nullable plan fields');
@@ -110,6 +157,7 @@ export async function exerciseHosting({diem, check, base, alice, bob, first}) {
   const puts = () => host.requests.filter(request => request.method === 'PUT');
   check(hex(puts()[0].body) === hex(signed.profile) && puts()[0].headers['Diem-Hosting-Proof'] === `alice=${base64(proof)}`, 'Exact signed bytes and proof header');
   await hosting.publish('id.example', signed.profile, {transport});
+  check(hex(await hosting.profile('id.example', 'alice', transport)) === hex(signed.profile), 'Child GET bytes');
   check((await hosting.plan('id.example', ['alice'], first.id, transport))[0].status === 'held', 'Held hint fetched from profile');
   check((await hosting.plan('id.example', ['alice'], '00'.repeat(32), transport))[0].status === 'taken', 'Taken hint fetched from profile');
   const other = await diem.identityOperation({...base, domain: 'alice.id.example'}, bob);

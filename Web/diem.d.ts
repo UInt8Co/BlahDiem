@@ -44,8 +44,15 @@ export type HostingTransport = (request: HostingHTTPRequest) => Promise<HostingH
 export interface HostingPuzzle {label: string; input: number[]; requiredBits: number}
 export type HostingSolver = (puzzle: HostingPuzzle) => Promise<Uint8Array | number[]>;
 
+/** A string targets a child label; {apex: true} targets the hosting domain itself. */
+export type HostingTarget = string | {apex: true};
 export interface HostingPolicy {
-  domain: string; labelPattern: string; maxClaimsPerIdentity: number;
+  domain: string; apex: boolean;
+  /** Present only when the host serves child names. */
+  names?: HostingNamesPolicy;
+}
+export interface HostingNamesPolicy {
+  labelPattern: string; maxClaimsPerIdentity: number;
   maxUpdatesPerIdentityPerHour: number; claimGraceAfterExpiry: number;
   proofOfWork: {algorithm: 'sha256-leading-zero-bits-v1'; baseBits: number;
     bitsPerShorterCharacter: number; referenceLength: number};
@@ -57,6 +64,10 @@ export interface HostingPlanName {
   requiredBits: number | null;
   /** Set for needsProof with requiredBits > 0. */
   puzzle: HostingPuzzle | null;
+}
+/** Apex planning checks policy support only; PUT decides ownership. No proof is needed. */
+export interface HostingPlanApex {
+  apex: true; status: 'available' | 'unsupported'; requiredBits: null; puzzle: null;
 }
 export interface HostingPublished {identity: string; revision: string; domains: string[]}
 
@@ -109,19 +120,23 @@ export interface DiemClient {
      * names is a hint from the name's current profile; the host decides at publication. */
     plan(domain: string, labels: string[], identity: string,
       transport?: HostingTransport): Promise<HostingPlanName[]>;
+    plan(domain: string, target: {apex: true}, identity: string,
+      transport?: HostingTransport): Promise<HostingPlanApex[]>;
+    /** GET the child or apex profile bytes; null on 404. Does not verify signatures. */
+    profile(domain: string, target: HostingTarget, transport?: HostingTransport): Promise<number[] | null>;
     /** Built-in single-threaded solver (@noble/hashes SHA-256 with a cloned prefix state,
      * 8-byte big-endian counters from `start` stepping by `stride`), yielding to the event
      * loop between batches. Rejects with type 'cancelled' when `signal` aborts.
      * Also usable as a HostingSolver: `puzzle => hosting.solve(puzzle)`. */
     solve(puzzle: HostingPuzzle, options?: {signal?: AbortSignal; start?: number;
       stride?: number; onProgress?: (attempts: number) => void}): Promise<number[]>;
-    /** One PUT of the exact signed profile bytes to `https://<via>.<domain>/.well-known/
-     * diem/profile.cbor` (`via` defaults to the profile's first hosted label), with the
-     * `Diem-Hosting-Proof` header built from `proofs` (label → nonce). With `solver`, a
-     * single proof-required refusal is answered by solving exactly the listed labels and
-     * retrying once; solver nonces are checked natively before they are sent. Sending identical
-     * bytes again succeeds, so callers retry an unanswered PUT with the same bytes. */
-    publish(domain: string, profile: Uint8Array | number[], options?: {via?: string;
+    /** PUT the exact signed bytes. `via` defaults to the first direct child in signed
+     * order, then a listed apex. A string selects a child (including a formerly held
+     * name for release); {apex: true} selects https://<domain>/.well-known/diem/profile.cbor
+     * and requires the profile to list <domain>. Apex never sends proofs or invokes the
+     * solver. Child proofs map labels to nonce bytes; a solver answers one proof-required
+     * refusal and retries once. Retry an unanswered PUT with the same saved bytes. */
+    publish(domain: string, profile: Uint8Array | number[], options?: {via?: HostingTarget;
       proofs?: Record<string, number[]>; solver?: HostingSolver;
       transport?: HostingTransport}): Promise<HostingPublished>;
   };

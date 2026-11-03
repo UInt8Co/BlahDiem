@@ -17,6 +17,13 @@ function labelList(labels) {
     throw new TypeError('Invalid hosting labels');
   }
 }
+function apexTarget(target) {
+  return target !== null && typeof target === 'object' && !Array.isArray(target) &&
+    target.apex === true && Object.keys(target).length === 1;
+}
+function targetOption(target) {
+  if(!apexTarget(target)) labelList([target]);
+}
 function abortable(action, signal) {
   if(signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
@@ -96,12 +103,22 @@ export function hosting(exports, bytes) {
     fetchTransport,
     async policy(domain, transport) {
       domainName(domain);
-      return exports.hostingPolicy(domain, callbacks(transport));
+      const policy = await exports.hostingPolicy(domain, callbacks(transport));
+      return {domain: policy.domain, apex: policy.apex, ...(policy.names == null ? {} : {names: policy.names})};
     },
     async plan(domain, labels, identity, transport) {
-      domainName(domain); labelList(labels);
+      domainName(domain);
+      if(!apexTarget(labels)) labelList(labels);
       if(typeof identity !== 'string' || !/^[0-9a-f]{64}$/.test(identity)) throw new TypeError('Invalid hosting identity');
+      if(apexTarget(labels)) {
+        const policy = await exports.hostingPolicy(domain, callbacks(transport));
+        return [{apex: true, status: policy.apex ? 'available' : 'unsupported', requiredBits: null, puzzle: null}];
+      }
       return exports.hostingPlan(domain, labels, Array.from(identity.matchAll(/../g), ([hex]) => parseInt(hex, 16)), callbacks(transport));
+    },
+    async profile(domain, target, transport) {
+      domainName(domain); targetOption(target);
+      return exports.hostingProfile(domain, apexTarget(target) ? null : target, apexTarget(target), callbacks(transport));
     },
     async solve(puzzle, {signal, start = 0, stride = 1, onProgress} = {}) {
       signalOption(signal);
@@ -141,11 +158,11 @@ export function hosting(exports, bytes) {
     },
     async publish(domain, profile, {via, proofs = {}, solver, transport} = {}) {
       domainName(domain);
-      if(via !== undefined) labelList([via]);
+      if(via !== undefined) targetOption(via);
       if(!proofs || typeof proofs !== 'object' || Array.isArray(proofs)) throw new TypeError('Invalid proofs');
       const labels = Object.keys(proofs);
       labelList(labels);
-      return exports.hostingPublish(domain, bytes(profile, 'profile', cap), via ?? null,
+      return exports.hostingPublish(domain, bytes(profile, 'profile', cap), apexTarget(via) ? null : via ?? null, apexTarget(via),
         labels.map(label => ({label, nonce: bytes(proofs[label], 'proof', 64)})),
         solver !== undefined, callbacks(transport, solver));
     }

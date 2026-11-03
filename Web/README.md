@@ -92,10 +92,19 @@ and manage devices. Invalid requests reject without replacing another call's sig
 
 ## Profile hosting
 
-`hosting.policy(domain, transport?)` reads a host’s limits and PoW policy.
+`hosting.policy(domain, transport?)` returns `{domain, apex, names?}`. `apex` is always
+boolean; `names` is present only for hosts serving child names and holds `labelPattern`,
+`maxClaimsPerIdentity`, `maxUpdatesPerIdentityPerHour`, `claimGraceAfterExpiry` and
+`proofOfWork: {algorithm, baseBits, bitsPerShorterCharacter, referenceLength}`.
+An apex-only policy is `{domain: 'id.example', apex: true}`.
 `hosting.plan(domain, labels, identity, transport?)` returns `invalid`, `taken`, `held`
 or `needsProof` names, with the difficulty and puzzle for new names. Pass the lowercase
 hex identity ID. Held names are unverified discovery hints; publication decides ownership.
+`hosting.plan(domain, {apex: true}, identity, transport?)` returns one entry:
+`[{apex: true, status: 'available' | 'unsupported', requiredBits: null, puzzle: null}]`.
+This checks the apex policy capability only; the host authorizes the identity at PUT.
+`hosting.profile(domain, labelOrApex, transport?)` fetches raw profile bytes, or `null`
+on 404. Pass a child label string or `{apex: true}`; verify the returned bytes separately.
 
 `hosting.solve(puzzle, {signal, start, stride, onProgress}?)` searches eight-byte counters
 and yields between batches. `onProgress` reports cumulative attempts; difficulty describes
@@ -107,8 +116,24 @@ that revision before `hosting.publish(domain, profile, {proofs, solver, transpor
 Proofs map labels to nonce bytes and are sent as given for the host to check; a solver
 answers one `proof-required` refusal, its nonces checked natively, and publication retries once. Publication accepts any Diem profile kind and returns the identity in
 hex, revision as a decimal string and hosted domains in signed order. Retry an unanswered
-PUT with the same saved bytes. `via` selects the name host, including a formerly held name
-for a full release; a completed full release may not be repeatable at that old name.
+PUT with the same saved bytes. `via` accepts a child label string or `{apex: true}`.
+With no `via`, publication selects the first direct child in signed domain order, then a
+listed apex. Explicit apex requires the profile to list the hosting domain and PUTs to
+`https://<domain>/.well-known/diem/profile.cbor`, without a proof header or solver work.
+A string can select a formerly held name for a full release; a completed full release
+may not be repeatable at that old name.
+
+```js
+const policy = await diem.hosting.policy('id.example');
+if(policy.apex) {
+  await diem.hosting.publish('id.example', signedProfile, {via: {apex: true}});
+  const bytes = await diem.hosting.profile('id.example', {apex: true});
+}
+```
+
+For discovery, probe the profile's first domain for a valid policy with `apex: true`,
+then its parent for a policy with `names`, then use manual HTTPS publication. Unavailable,
+invalid or mismatched policies move to the next step. This applies to every profile kind.
 
 `hosting.fetchTransport({signal, timeout}?)` defaults to a 15-second timeout, refuses
 redirects, omits credentials and referrers, disables caching and caps streamed responses at

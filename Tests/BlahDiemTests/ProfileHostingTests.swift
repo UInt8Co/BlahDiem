@@ -4,6 +4,40 @@ import Testing
 @Suite struct ProfileHostingTests {
   let backend = TestBackend()
 
+  @Test func apexPolicyAndTargetsAreReexported() async throws {
+    let domain = try DomainName("id.example")
+    let policy = try HostingPolicy(json: HostingTestHost.json(["domain": domain.name, "apex": true]).body,
+      domain: domain)
+    #expect(policy.apex && !policy.servesChildNames)
+    #expect(policy.names == nil)
+    #expect(policy.requiredBits(for: "alice") == nil)
+    #expect(throws: ProfileHostingError.invalidResponse) {
+      try HostingPolicy(json: HostingTestHost.json(["domain": domain.name, "apex": true,
+        "labelPattern": "[a-z]+"]).body, domain: domain)
+    }
+    let child = try HostingPolicy(json: HostingTestHost.json(HostingTestHost.policy()).body, domain: domain)
+    #expect(!child.apex && child.names?.baseBits == 4)
+
+    let transport = ApexTransport()
+    let host = ProfileHostingClient(domain: domain, http: transport)
+    let identity = try await BasicIdentity<AnyBlahProfile>(.user(.init(home: Fixture.home(), domains: [domain])), using: backend)
+    let publication = HostingPublication(profile: identity.profile, via: HostingTarget.apex)
+    #expect(publication.via == .apex)
+    try await host.publish(publication, solver: PortableProofOfWorkSolver())
+    #expect(try await host.profile(at: .apex) == identity.profile.encoding)
+    let mixed = try await identity.updating(identity.profile.content.replacingDomains([domain, DomainName("alice.id.example")]))
+    try await host.publish(mixed)
+    try await host.publish(mixed, via: .apex, proofs: ["alice": [1]], solver: PortableProofOfWorkSolver())
+    let requests = await transport.requests
+    #expect(requests.map(\.url) == [
+      "https://id.example/.well-known/diem/profile.cbor",
+      "https://id.example/.well-known/diem/profile.cbor",
+      "https://alice.id.example/.well-known/diem/profile.cbor",
+      "https://id.example/.well-known/diem/profile.cbor",
+    ])
+    #expect(requests.last?.headers["Diem-Hosting-Proof"] == nil)
+  }
+
   @Test func claimAndReleasePreserveHostedKinds() async throws {
     let home = Fixture.home(account: 123)
     let original = try DomainName("original.example")
@@ -29,7 +63,7 @@ import Testing
       let release = try await identity.releasing(labels: ["alice"], at: host,
         transform: { try $0.replacingDomains($1) })
       #expect(release.profile.content == content)
-      #expect(release.via == "alice")
+      #expect(release.via == .name("alice"))
       try await host.publish(release, solver: PortableProofOfWorkSolver())
       #expect(await transport.claims.isEmpty)
     }
@@ -74,5 +108,19 @@ import Testing
         try await host.publish(claim, solver: PortableProofOfWorkSolver())
       }
     }
+  }
+}
+
+private actor ApexTransport: HostingHTTPClient {
+  var requests: [HostingHTTPRequest] = []
+  var encoding: [UInt8] = []
+
+  func send(_ request: HostingHTTPRequest) async throws -> HostingHTTPResponse {
+    requests.append(request)
+    if request.method == .get { return .init(status: 200, body: encoding) }
+    encoding = request.body ?? []
+    let profile = try ProfileRecord(encoding: encoding)
+    return HostingTestHost.json(["identity": HostingTestHost.base64(profile.id.bytes),
+      "revision": profile.revision, "domains": profile.domains.map(\.name)])
   }
 }
