@@ -1,12 +1,12 @@
 {
-  "originHash" : "c571f45976cc14bfb114e3e866ccb22ee322223bbc08d8446604cc60d5de4890",
+  "originHash" : "20330d29f7d054009a085df21998d458887ef14a4a2b8659014df05a0a6b56b9",
   "pins" : [
     {
       "identity" : "diem",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/UInt8Co/diem.git",
       "state" : {
-        "revision" : "55780087db25c771b97b7947a0419befe828ce80"
+        "revision" : "7c00eb51829eab2ca3779b320d1f607c729c2c8d"
       }
     },
     {
