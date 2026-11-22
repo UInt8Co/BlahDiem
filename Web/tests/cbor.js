@@ -10,7 +10,7 @@ export function encode(value) {
   };
   if(value === null) return [246];
   if(typeof value === 'boolean') return [value ? 245 : 244];
-  if(typeof value === 'number' || typeof value === 'bigint') return head(0, value);
+  if(typeof value === 'number' || typeof value === 'bigint') return value < 0 ? head(1, -1n - BigInt(value)) : head(0, value);
   if(typeof value === 'string') {
     const bytes = [...new TextEncoder().encode(value)];
     return [...head(3, bytes.length), ...bytes];

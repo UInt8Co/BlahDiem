@@ -22,7 +22,7 @@ export interface CryptoBackend {
 /** Verified public facts. All integers are exact decimal strings; IDs are lowercase hex. */
 export interface ProfileInfo {
   id: string;
-  kind: 'user' | 'channel' | 'bot' | 'stickerSet' | 'dc';
+  kind: 'user' | 'channel' | 'bot' | 'stickerSet' | 'dc' | 'application';
   generation: string;
   revision: string;
   notBefore: string;
@@ -31,7 +31,33 @@ export interface ProfileInfo {
   lapsed: boolean;
   domains: string[];
   home: {dc: string; account: string | null; epoch: string} | null;
+  /** Decoded content; non-null exactly when `kind` is 'application'. */
+  application: ApplicationInfo | null;
 }
+/** An application's decoded profile content. IDs are lowercase hex; versions are exact
+ * decimal strings, strictly increasing boundaries. `null` versions enable every version;
+ * an empty list enables none. Ranges alternate enabled/disabled, starting enabled. */
+export interface ApplicationInfo {
+  name: string;
+  downloadURL: string | null;
+  /** The application's bot identity and its home DC's identity. */
+  bot: {id: string; dc: string} | null;
+  oauth: {
+    publicClient: boolean;
+    redirectURIs: string[];
+    /** `publicKey` is raw: Ed25519 (32 bytes) or SEC1 P-256 (65 bytes). */
+    clientKeys: {keyID: string; algorithm: 'EdDSA' | 'ES256'; publicKey: number[]}[];
+  } | null;
+  push: {
+    credentialsURL: string;
+    apns: {topic: string; productionURL: string; sandboxURL: string} | null;
+    /** `vapidPublicKey` is a 65-byte SEC1 P-256 key. */
+    webPush: {proxyURL: string; vapidPublicKey: number[]} | null;
+  } | null;
+  versions: string[] | null;
+}
+/** The public MTProto `api_id` (a safe integer at least 0x40000000) and 32-hex `api_hash`. */
+export interface ApplicationWirePair {apiID: number; apiHash: string}
 /** One HTTP exchange. The default transport is `hosting.fetchTransport()`. */
 export interface HostingHTTPRequest {method: 'GET' | 'HEAD' | 'PUT'; url: string;
   headers: Record<string, string>; body: number[] | null}
@@ -154,6 +180,10 @@ export interface DiemClient {
   /** Verifies stored public profiles, including lapsed ones, without domain binding.
    * Callers own identity pinning and persistent generation/revision floors. */
   verifyProfile(encoding: number[] | Uint8Array, now: number, crypto: Pick<CryptoBackend, 'verify'>): Promise<ProfileInfo>;
+  /** Derives the wire pair from a verified `application` ProfileInfo, or from an application
+   * identity ID (lowercase hex, e.g. one already pinned). Other kinds and malformed IDs throw
+   * TypeError. A bare ID is not checked to be an application; verify its profile first. */
+  applicationWirePair(source: ProfileInfo | string): ApplicationWirePair;
   inspectChallenge(kind: string, encoding: number[] | Uint8Array): ChallengeInfo;
 }
 declare const deviceLinkSession: unique symbol;

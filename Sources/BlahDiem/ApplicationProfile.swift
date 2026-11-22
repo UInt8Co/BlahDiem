@@ -319,12 +319,12 @@ public struct ApplicationProfile: BlahProfile {
         downloadURL.map(ApplicationProfile.isHTTPSURL) ?? true
       else { throw .invalidProfile }
       if let oauth {
-        let keyIDs = Set(oauth.clientKeys.map(\.keyID))
+        let keyIDs = Set(oauth.clientKeys.map { $0.keyID })
         guard (1...ApplicationProfile.maximumRedirectURIs).contains(oauth.redirectURIs.count),
           Set(oauth.redirectURIs).count == oauth.redirectURIs.count,
           oauth.redirectURIs.allSatisfy(ApplicationProfile.isRedirectURI),
           oauth.clientKeys.count <= ApplicationProfile.maximumClientKeys,
-          keyIDs.count == oauth.clientKeys.count, oauth.clientKeys.allSatisfy(\.isValid)
+          keyIDs.count == oauth.clientKeys.count, oauth.clientKeys.allSatisfy({ $0.isValid })
         else { throw .invalidProfile }
       }
       if let push {

@@ -90,6 +90,11 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
       }
       return exports.verifyDCProfile(domain, bytes(encoding, 'profile'), now, crypto);
     },
+    applicationWirePair(source) {
+      const id = typeof source === 'string' ? source : source?.kind === 'application' ? source.id : null;
+      if(typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id)) throw new TypeError('Invalid application identity');
+      return exports.applicationWirePair(Array.from(id.match(/../g), pair => parseInt(pair, 16)));
+    },
     inspectChallenge(kind, encoding) {
       if(!challengeKinds.has(kind)) throw new TypeError('Invalid challenge kind');
       return exports.inspectChallenge(kind, bytes(encoding, 'challenge', 140_000));

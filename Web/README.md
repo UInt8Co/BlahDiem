@@ -63,7 +63,7 @@ itself as account 777000. DC creation uses `dcSetup`; changing its account or ho
   public key. The caller owns HTTPS fetching, transport selection, identity pinning and
   persistent version floors; this operation only requires the `verify` crypto callback.
 - `verifyProfile(encoding, now, crypto)` verifies a stored public `user`, `channel`,
-  `bot`, `stickerSet` or `dc` profile without domain binding or private keys; only
+  `bot`, `stickerSet`, `dc` or `application` profile without domain binding or private keys; only
   `crypto.verify` is required. Diem validates the record, every device certificate
   and the content signature at the profile's `notBefore`; BlahDiem validates its kind
   and application fields. Invalid signatures or structure reject with the native error
@@ -75,9 +75,17 @@ itself as account 777000. DC creation uses `dcSetup`; changing its account or ho
   `lapsed` is true when `now < notBefore` or `now >= expiresAt`; such profiles still
   verify because the server returns its latest stored profile even after expiry.
   A DC's home is itself, account `777000`, epoch `1`. Hosted profiles may have no home.
+  `application` is non-null only for application profiles and holds their decoded
+  content (name, download URL, bot, OAuth client data, push proxies and version
+  boundaries); see `ApplicationInfo` in `diem.d.ts`.
   This is a stateless check: callers bind the result to the expected identity and
   retain monotonic generation/revision floors. Listed domains are signed claims,
   not proof of current domain control; `lapsed` describes the profile window only.
+- `applicationWirePair(source)` returns `{apiID, apiHash}`, the application's public
+  MTProto `api_id` (a number above every DC-local legacy ID) and `api_hash`, derived by
+  BlahDiem from the identity ID. `source` is a verified `application` `ProfileInfo` or an
+  identity ID in lowercase hex; any other profile kind or malformed ID throws `TypeError`.
+  A bare ID is not checked to belong to an application, so verify its profile first.
 - `inspectChallenge` decodes `invocation`, `login`, `oauthConsent`, `accountLink`
   and `dcAdmin` challenges into fields for session checks or consent UI. It does
   not authenticate the issuing server or grant approval.

@@ -163,6 +163,69 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     }
   }
 
+  {
+    // Application profiles: a user fixture re-signed with application content.
+    const signer = await backend();
+    const request = {...base, kind: 'user', domain: 'app.example.org'};
+    const user = await diem.identityOperation(request, signer);
+    const asApplication = (application, domains) => resign(user.profile, signer, fields => {
+      for(const key of Object.keys(fields)) if(key >= 16) delete fields[key];
+      if(domains) fields[9] = domains;
+      Object.assign(fields, {16: 6, ...application});
+    });
+    const key32 = new Uint8Array(32).fill(5), key65 = new Uint8Array(65).fill(6); key65[0] = 4;
+    const full = {18: 'Example App', 19: 'https://app.example.org/download', 20: {0: new Uint8Array(32).fill(1), 1: dc},
+      21: {0: false, 1: ['https://app.example.org/cb', 'example-app://cb'],
+        2: [{0: 'ed', 1: 1, 2: key32}, {0: 'es', 1: 2, 2: key65}]},
+      22: {0: 'https://push.example.org/credentials', 1: {0: 'org.example.app', 1: 'https://push.example.org/apns',
+        2: 'https://push.example.org/apns-sandbox'}, 2: {0: 'https://push.example.org/web', 1: key65}},
+      23: [1, 9007199254740993n]};
+    const profile = await asApplication(full);
+    const info = await publicInfo(profile);
+    check(info.kind === 'application' && info.id === user.id && info.home === null &&
+      info.domains.length === 1 && info.domains[0] === 'app.example.org', 'Application profile facts');
+    const application = info.application;
+    check(application.name === 'Example App' && application.downloadURL === 'https://app.example.org/download' &&
+      application.bot.id === '01'.repeat(32) && application.bot.dc === base.dc.map(v => v.toString(16).padStart(2, '0')).join('') &&
+      JSON.stringify(application.versions) === JSON.stringify(['1', '9007199254740993']), 'Application name, bot and versions');
+    check(application.oauth.publicClient === false && application.oauth.redirectURIs.length === 2 &&
+      application.oauth.clientKeys.length === 2 && application.oauth.clientKeys[0].algorithm === 'EdDSA' &&
+      equal(bytes(application.oauth.clientKeys[0].publicKey), key32) && application.oauth.clientKeys[1].algorithm === 'ES256' &&
+      application.oauth.clientKeys[1].keyID === 'es', 'Application OAuth');
+    check(application.push.credentialsURL === 'https://push.example.org/credentials' &&
+      application.push.apns.topic === 'org.example.app' && application.push.apns.sandboxURL === 'https://push.example.org/apns-sandbox' &&
+      application.push.webPush.proxyURL === 'https://push.example.org/web' &&
+      equal(bytes(application.push.webPush.vapidPublicKey), key65), 'Application push');
+    const minimal = await publicInfo(await asApplication({18: 'Minimal', 19: null, 20: null, 21: null, 22: null, 23: null}));
+    check(minimal.application.downloadURL === null && minimal.application.bot === null && minimal.application.oauth === null &&
+      minimal.application.push === null && minimal.application.versions === null, 'Absent application fields');
+    check((await publicInfo(await asApplication({...full, 23: []}))).application.versions.length === 0, 'Empty versions');
+    check((await publicInfo(await asApplication({...full, 23: [-5, 0]}))).application.versions[0] === '-5', 'Negative version');
+    check(info.application !== null && (await publicInfo(user.profile)).application === null, 'Content only for applications');
+    for(const bad of [{...full, 19: 'http://app.example.org/'}, {...full, 23: [2, 2]}, {...full, 23: [3, 1]},
+      {...full, 18: ''}, {...full, 21: {...full[21], 1: []}}, {...full, 21: {...full[21], 2: [full[21][2][0], full[21][2][0]]}},
+      {...full, 22: {...full[22], 2: {0: 'https://push.example.org/web', 1: key32}}}, {...full, 20: {0: new Uint8Array(31), 1: dc}}]) {
+      await rejectsWith(async() => publicInfo(await asApplication(bad)), 'invalidProfile');
+    }
+    await rejectsWith(async() => publicInfo(await asApplication({18: 'Missing'})), 'invalidProfile');
+    // The wire pair is derived natively; recompute SHA-256("Blah/app-id:1" || id) independently.
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256',
+      new Uint8Array([...new TextEncoder().encode('Blah/app-id:1'), ...fromHex(info.id)])));
+    const apiID = ((digest[0] << 24 | digest[1] << 16 | digest[2] << 8 | digest[3]) & 0x3fffffff) + 0x40000000;
+    const apiHash = Array.from(digest.slice(4, 20), v => v.toString(16).padStart(2, '0')).join('');
+    const pair = diem.applicationWirePair(info);
+    check(pair.apiID === apiID && pair.apiHash === apiHash && apiID >= 0x40000000 && apiHash.length === 32, 'Application wire pair');
+    check(typeof pair.apiID === 'number', 'Wire pair api_id is a number');
+    const fromID = diem.applicationWirePair(info.id);
+    check(fromID.apiID === apiID && fromID.apiHash === apiHash, 'Wire pair from an identity');
+    for(const invalid of [await publicInfo(user.profile), {kind: 'application', id: 'xyz'}, info.id.toUpperCase(), info.id.slice(2),
+      '', null, undefined, 5, {id: info.id}]) {
+      let thrown = false;
+      try { diem.applicationWirePair(invalid); } catch(error) { thrown = error instanceof TypeError; }
+      check(thrown, 'Wire pair rejects non-application input');
+    }
+  }
+
   const dcData = encode({9: ['dc.example.org'], 16: 5, 18: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
     19: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 20: 'transport-public-key', 21: 1});
   const input = {data: dcData, profile: null, seed: alice.seed, device: alice.device, now: base.now};
