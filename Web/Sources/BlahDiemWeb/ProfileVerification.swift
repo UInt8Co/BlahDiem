@@ -47,6 +47,7 @@ import JavaScriptKit
     case .bot: kind = "bot"
     case .stickerSet: kind = "stickerSet"
     case .dc: kind = "dc"
+    case .application: kind = "application"
     }
     return ProfileInfo(id: profile.id.description, kind: kind,
       generation: String(profile.generation), revision: String(profile.revision),

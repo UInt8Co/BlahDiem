@@ -20,6 +20,9 @@ extension AnyBlahProfile.Content {
     case .dc(var content):
       content.domains = domains
       next = .dc(content)
+    case .application(var content):
+      content.domains = domains
+      next = .application(content)
     }
     _ = try AnyBlahProfile.fields(for: next)
     return next

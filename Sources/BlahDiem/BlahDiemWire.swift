@@ -24,6 +24,7 @@ enum ProfileKind: UInt64 {
   case bot = 3
   case stickerSet = 4
   case dc = 5
+  case application = 6
 }
 
 /// Decoding helpers that map Diem encoding errors to one Blah error.

@@ -90,6 +90,20 @@ and contain no duplicates; BIDCOM accepts TCP only and can be empty. Clients ver
 profile and that it serves its discovery domain before using these values. The field
 keys and validation belong to each profile type.
 
+An ``ApplicationProfile`` describes client software that connects to any DC. It has
+no home. Its first domain names it to DCs and OAuth. It carries a display name and
+optionally a download URL, a bot (the bot's identity and its home DC's identity), OAuth
+client data (public-client flag, exact redirect URIs and `private_key_jwt` keys for
+`EdDSA` or `ES256`), push proxy endpoints (an HTTPS credentials URL, APNs topic and
+production and sandbox proxies, a Web Push proxy and VAPID public key) and enabled
+versions. The versions are strictly increasing boundaries. Each one starts a range that
+runs up to the next. The ranges alternate between enabled and disabled, starting
+enabled, so versions below the first boundary are disabled. An absent list enables every
+version and an empty list enables none; see
+``ApplicationProfile/Content/isEnabled(version:)``. ``ApplicationWirePair`` derives
+the MTProto `api_id` and `api_hash` from the identity ID. Neither value is secret.
+Derived IDs start at `0x40000000`, above DC-local legacy IDs.
+
 ## Profile hosting
 
 BlahDiem re-exports `DiemProfileHostingClient`. Supply its HTTP transport and solver;

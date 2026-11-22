@@ -4,7 +4,7 @@ Blah profiles and proofs on Diem identities, shared by Blah clients and DCs.
 
 ## Overview
 
-Every Blah account, bot, channel, sticker set and DC is a Diem identity. Each Blah
+Every Blah account, bot, channel, sticker set, DC and application is a Diem identity. Each Blah
 profile type is a Diem `DomainNamedProfile`, and its devices sign the DC's challenges as
 Blah proofs.
 
@@ -32,6 +32,8 @@ let proof = try await identity.prove(loginChallenge)
 - ``ChannelProfile``
 - ``StickerSetProfile``
 - ``DCProfile``
+- ``ApplicationProfile``
+- ``ApplicationWirePair``
 - ``AnyBlahProfile``
 - ``AnyBlahProfile/Content/replacingDomains(_:)``
 - ``HostedContent``

@@ -168,6 +168,7 @@ public enum AnyBlahProfile: BlahProfile {
     case channel(HostedContent)
     case stickerSet(StickerSetProfile.Content)
     case dc(DCProfile.Content)
+    case application(ApplicationProfile.Content)
 
     /// Decodes the content of signed or unsigned profile fields.
     public init(fields: ProfileFields) throws(BlahError) {
@@ -179,6 +180,7 @@ public enum AnyBlahProfile: BlahProfile {
         let hosted = try HostedRecord.decode(fields, kind: .stickerSet)
         self = .stickerSet(.init(home: hosted.home, shortName: hosted.domains[0]))
       case .dc: self = .dc(try DCProfile.Content(fields: fields))
+      case .application: self = .application(try ApplicationProfile.Content(fields: fields))
       }
     }
   }
@@ -188,6 +190,7 @@ public enum AnyBlahProfile: BlahProfile {
   case channel(ChannelProfile)
   case stickerSet(StickerSetProfile)
   case dc(DCProfile)
+  case application(ApplicationProfile)
 
   /// Decodes a public Blah profile and verifies its certificates and signature at
   /// the start of its signed validity window, including profiles that have lapsed.
@@ -206,6 +209,7 @@ public enum AnyBlahProfile: BlahProfile {
     case .channel: self = .channel(try ChannelProfile(record: record))
     case .stickerSet: self = .stickerSet(try StickerSetProfile(record: record))
     case .dc: self = .dc(try DCProfile(record: record))
+    case .application: self = .application(try ApplicationProfile(record: record))
     }
   }
 
@@ -216,6 +220,7 @@ public enum AnyBlahProfile: BlahProfile {
     case .channel(let c): try ChannelProfile.fields(for: c)
     case .stickerSet(let c): try StickerSetProfile.fields(for: c)
     case .dc(let c): try DCProfile.fields(for: c)
+    case .application(let c): try ApplicationProfile.fields(for: c)
     }
   }
 
@@ -226,6 +231,7 @@ public enum AnyBlahProfile: BlahProfile {
     case .channel(let p): p.record
     case .stickerSet(let p): p.record
     case .dc(let p): p.record
+    case .application(let p): p.record
     }
   }
 
@@ -236,6 +242,7 @@ public enum AnyBlahProfile: BlahProfile {
     case .channel(let p): .channel(p.content)
     case .stickerSet(let p): .stickerSet(p.content)
     case .dc(let p): .dc(p.content)
+    case .application(let p): .application(p.content)
     }
   }
 
@@ -246,6 +253,7 @@ public enum AnyBlahProfile: BlahProfile {
     case .channel(let p): p.home
     case .stickerSet(let p): p.home
     case .dc(let p): p.home
+    case .application(let p): p.home
     }
   }
 }
@@ -295,7 +303,7 @@ enum HostedRecord {
   static func validate(_ content: HostedContent, kind: ProfileKind) throws(BlahError) {
     if let home = content.home {
       let accountLimit: Int64 = switch kind {
-      case .user, .bot, .dc: 9_007_199_254_740_991
+      case .user, .bot, .dc, .application: 9_007_199_254_740_991
       case .channel: 997_852_516_352
       case .stickerSet: .max
       }
