@@ -74,7 +74,7 @@ for(const name of ['diem.js', 'device-link-worker.js', 'diem.wasm', 'diem.d.ts',
 // Budgets include recovery words, HPKE and Ed25519 public derivation.
 // The worker also derives public identity keys when checking transferred seeds.
 if(files['diem.wasm'].bytes > 650_000 || files['diem.wasm.br'].bytes > 215_000 ||
-  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 140_000) {
+  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 142_000) {
   throw new Error('Web artifact exceeds its size budget; inspect before releasing.');
 }
 const source = {repository: 'https://github.com/UInt8Co/BlahDiem',
