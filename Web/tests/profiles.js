@@ -7,8 +7,10 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   const dc = bytes(base.dc), nonce = new Uint8Array(32).fill(7), expires = base.now + 60;
   const keyID = 18446744073709551614n, sessionID = 18446744073709551613n;
   const content = profile => decode(decode(decode(profile)[4])[0]);
-  // Profile domains (9) and application fields (16 and up), as signed in the content.
-  const fields = profile => Object.fromEntries(Object.entries(content(profile)).filter(([key]) => key == 9 || key >= 16));
+  // Blah's map in the profile content.
+  const blah = profile => content(profile)['com.blahim'];
+  // Profile domains (9) and application fields (reverse-DNS keys), as signed in the content.
+  const fields = profile => Object.fromEntries(Object.entries(content(profile)).filter(([key]) => key == 9 || !/^\d+$/.test(key)));
   const publicCrypto = {verify: alice.verify};
   const publicInfo = (profile, now = base.now) => diem.verifyProfile(profile, now, publicCrypto);
   const rejectsWith = async(action, message) => {
@@ -31,8 +33,10 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     const {0: message, 1: signature} = decode(result.proof);
     check(await signer.verify(signer.publicKey('device'), message, signature), 'Proof signature');
     const proof = decode(message);
+    check(proof[0] === 'Diem/proof' && proof[1] === 4 && Object.keys(proof).join() === '0,1,2,3,com.blahim', 'Proof layout');
     check(equal(proof[2], fromHex(result.id)), 'Proof identity binding');
-    check(equal(proof[4], statement), 'Proof statement binding');
+    // The com.blahim value is the statement's record map; it re-encodes to the exact bytes.
+    check(equal(encode(proof['com.blahim']), statement), 'Proof statement binding');
   };
   for(const [kind, tag, domain, account] of [
     ['user', 1, 'person.example.org', '1000000'],
@@ -43,7 +47,7 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     const signer = await backend();
     const request = {...base, kind, domain};
     const created = await diem.identityOperation(request, signer);
-    check(content(created.profile)[16] === tag && content(created.profile)[9][0] === domain, `${kind} profile kind`);
+    check(blah(created.profile)[0] === tag && content(created.profile)[9][0] === domain, `${kind} profile kind`);
     const perform = (operation, extra = {}, profile = created.profile) =>
       diem.identityOperation({...request, operation, profile, ...extra}, signer);
     await rejects(() => perform('inspect', {kind: kind === 'user' ? 'channel' : 'user'}));
@@ -69,22 +73,22 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     const badCertificate = decode(numbered.profile), certificate = decode(badCertificate[3][0]);
     certificate[1][0] ^= 1; badCertificate[3][0] = bytes(encode(certificate));
     await rejectsWith(() => publicInfo(encode(badCertificate)), 'invalidSignature');
-    const invalidKind = await resign(numbered.profile, signer, fields => { fields[16] = 99; });
+    const invalidKind = await resign(numbered.profile, signer, fields => { fields['com.blahim'][0] = 99; });
     await rejectsWith(() => publicInfo(invalidKind), 'invalidProfile');
     if(kind === 'user') {
       const domains = ['z.example.org', domain, 'a.example.org'];
       const ordered = await perform('domains', {domains}, numbered.profile);
       check(JSON.stringify((await publicInfo(ordered.profile)).domains) === JSON.stringify(domains), 'Public domain order');
-      const noHome = await resign(numbered.profile, signer, fields => { fields[17] = null; });
+      const noHome = await resign(numbered.profile, signer, fields => { fields['com.blahim'][1] = null; });
       check((await publicInfo(noHome)).home === null, 'Absent public home');
-      const bigEpoch = await resign(numbered.profile, signer, fields => { fields[17][1] = 9007199254740993n; });
+      const bigEpoch = await resign(numbered.profile, signer, fields => { fields['com.blahim'][1][1] = 9007199254740993n; });
       check((await publicInfo(bigEpoch)).home.epoch === '9007199254740993', 'Public epoch precision');
       for(const change of [fields => { fields[5] = 0; }, fields => { fields[6] = new Uint8Array(); },
         fields => { fields[3] = 2; }, fields => { fields[8] = numbered.expiresAt + 1; }]) {
         const invalid = await resign(numbered.profile, signer, change);
         await rejects(() => publicInfo(invalid));
       }
-      const invalidHome = await resign(numbered.profile, signer, fields => { fields[17][1] = 0; });
+      const invalidHome = await resign(numbered.profile, signer, fields => { fields['com.blahim'][1][1] = 0; });
       await rejectsWith(() => publicInfo(invalidHome), 'invalidProfile');
       // Custody works on any DC; acting as or numbering an account needs its home.
       const otherDC = Array(32).fill(8), otherHex = '08'.repeat(32);
@@ -169,17 +173,16 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     const request = {...base, kind: 'user', domain: 'app.example.org'};
     const user = await diem.identityOperation(request, signer);
     const asApplication = (application, domains) => resign(user.profile, signer, fields => {
-      for(const key of Object.keys(fields)) if(key >= 16) delete fields[key];
       if(domains) fields[9] = domains;
-      Object.assign(fields, {16: 6, ...application});
+      fields['com.blahim'] = {0: 6, ...application};
     });
     const key32 = new Uint8Array(32).fill(5), key65 = new Uint8Array(65).fill(6); key65[0] = 4;
-    const full = {18: 'Example App', 19: 'https://app.example.org/download', 20: {0: new Uint8Array(32).fill(1), 1: dc},
-      21: {0: false, 1: ['https://app.example.org/cb', 'example-app://cb'],
+    const full = {2: 'Example App', 3: 'https://app.example.org/download', 4: {0: new Uint8Array(32).fill(1), 1: dc},
+      5: {0: false, 1: ['https://app.example.org/cb', 'example-app://cb'],
         2: [{0: 'ed', 1: 1, 2: key32}, {0: 'es', 1: 2, 2: key65}]},
-      22: {0: 'https://push.example.org/credentials', 1: {0: 'org.example.app', 1: 'https://push.example.org/apns',
+      6: {0: 'https://push.example.org/credentials', 1: {0: 'org.example.app', 1: 'https://push.example.org/apns',
         2: 'https://push.example.org/apns-sandbox'}, 2: {0: 'https://push.example.org/web', 1: key65}},
-      23: [1, 9007199254740993n]};
+      7: [1, 9007199254740993n]};
     const profile = await asApplication(full);
     const info = await publicInfo(profile);
     check(info.kind === 'application' && info.id === user.id && info.home === null &&
@@ -196,18 +199,18 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
       application.push.apns.topic === 'org.example.app' && application.push.apns.sandboxURL === 'https://push.example.org/apns-sandbox' &&
       application.push.webPush.proxyURL === 'https://push.example.org/web' &&
       equal(bytes(application.push.webPush.vapidPublicKey), key65), 'Application push');
-    const minimal = await publicInfo(await asApplication({18: 'Minimal', 19: null, 20: null, 21: null, 22: null, 23: null}));
+    const minimal = await publicInfo(await asApplication({2: 'Minimal', 3: null, 4: null, 5: null, 6: null, 7: null}));
     check(minimal.application.downloadURL === null && minimal.application.bot === null && minimal.application.oauth === null &&
       minimal.application.push === null && minimal.application.versions === null, 'Absent application fields');
-    check((await publicInfo(await asApplication({...full, 23: []}))).application.versions.length === 0, 'Empty versions');
-    check((await publicInfo(await asApplication({...full, 23: [-5, 0]}))).application.versions[0] === '-5', 'Negative version');
+    check((await publicInfo(await asApplication({...full, 7: []}))).application.versions.length === 0, 'Empty versions');
+    check((await publicInfo(await asApplication({...full, 7: [-5, 0]}))).application.versions[0] === '-5', 'Negative version');
     check(info.application !== null && (await publicInfo(user.profile)).application === null, 'Content only for applications');
-    for(const bad of [{...full, 19: 'http://app.example.org/'}, {...full, 23: [2, 2]}, {...full, 23: [3, 1]},
-      {...full, 18: ''}, {...full, 21: {...full[21], 1: []}}, {...full, 21: {...full[21], 2: [full[21][2][0], full[21][2][0]]}},
-      {...full, 22: {...full[22], 2: {0: 'https://push.example.org/web', 1: key32}}}, {...full, 20: {0: new Uint8Array(31), 1: dc}}]) {
+    for(const bad of [{...full, 3: 'http://app.example.org/'}, {...full, 7: [2, 2]}, {...full, 7: [3, 1]},
+      {...full, 2: ''}, {...full, 5: {...full[5], 1: []}}, {...full, 5: {...full[5], 2: [full[5][2][0], full[5][2][0]]}},
+      {...full, 6: {...full[6], 2: {0: 'https://push.example.org/web', 1: key32}}}, {...full, 4: {0: new Uint8Array(31), 1: dc}}]) {
       await rejectsWith(async() => publicInfo(await asApplication(bad)), 'invalidProfile');
     }
-    await rejectsWith(async() => publicInfo(await asApplication({18: 'Missing'})), 'invalidProfile');
+    await rejectsWith(async() => publicInfo(await asApplication({2: 'Missing'})), 'invalidProfile');
     // The wire pair is derived natively; recompute SHA-256("Blah/app-id:1" || id) independently.
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256',
       new Uint8Array([...new TextEncoder().encode('Blah/app-id:1'), ...fromHex(info.id)])));
@@ -226,11 +229,12 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     }
   }
 
-  const dcData = encode({9: ['dc.example.org'], 16: 5, 18: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
-    19: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 20: 'transport-public-key', 21: 1});
+  // DC setup data: domains (9) and Blah's map, which a DC profile signs as given.
+  const dcData = encode({9: ['dc.example.org'], 'com.blahim': {0: 5, 2: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
+    3: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 4: 'transport-public-key', 5: 1}});
   const input = {data: dcData, profile: null, seed: alice.seed, device: alice.device, now: base.now};
   const created = await diem.dcSetup(input);
-  check(content(created.profile)[16] === 5 && created.devices.length === 1, 'DC creation without a server device');
+  check(blah(created.profile)[0] === 5 && created.devices.length === 1, 'DC creation without a server device');
   const dcRequest = {...base, kind: 'user', domain: 'dc.example.org', dcDomain: 'dc.example.org',
     dc: fromHex(created.id), profile: created.profile};
   const operateDC = (operation, extra = {}) => diem.identityOperation({...dcRequest, operation, ...extra}, alice);
@@ -245,7 +249,7 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     query: dcQuery}), alice, encode({0: 5, 1: 1, 2: bytes(dcInvocation), 3: 1,
     4: new Uint8Array(await crypto.subtle.digest('SHA-512', dcQuery))}));
   const dcRenewed = await operateDC('renew', {now: base.now + 10});
-  check(content(dcRenewed.profile)[16] === 5 && dcRenewed.account === '777000', 'User renewal preserves DC kind');
+  check(blah(dcRenewed.profile)[0] === 5 && dcRenewed.account === '777000', 'User renewal preserves DC kind');
   await rejects(() => operateDC('account', {account: '1000000'}));
   check((await operateDC('inspect', {dc: base.dc})).namespace === '', 'DC inspected away from itself');
   await rejects(() => operateDC('home', {dc: base.dc}));
@@ -327,6 +331,8 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
   await rejects(() => diem.dcSetup({...input, profile: first.profile}));
   await rejects(() => diem.dcSetup({...input, data: encode(fields(first.profile))}));
   await rejects(() => diem.dcSetup({...input, data: encode({...fields(created.profile), 10: null})}));
+  // Callers author only domains and application fields; the old integer layout is refused.
+  await rejects(() => diem.dcSetup({...input, data: encode({9: ['dc.example.org'], 16: 5, 20: 'transport-public-key', 21: 1})}));
   await rejects(() => diem.dcSetup({...input, data: new Array(10)}));
   await rejects(() => diem.dcSetup({...input, now: 1.5}));
   const wrongSigner = await backend();

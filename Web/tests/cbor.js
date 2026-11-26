@@ -1,4 +1,8 @@
 // Independent fixture codec: production wire formats always come from Swift.
+// Maps decode to plain objects; on encoding, decimal keys are integers and other keys
+// are text (application IDs). Keys sort by encoded length, then bytes.
+export class Raw { constructor(bytes) { this.bytes = Array.from(bytes); } }
+
 export function encode(value) {
   const head = (major, value) => {
     let n = BigInt(value);
@@ -8,6 +12,7 @@ export function encode(value) {
     for(let i = size - 1; i >= 0; i--) { bytes[i] = Number(n & 255n); n >>= 8n; }
     return [major * 32 + ({1: 24, 2: 25, 4: 26, 8: 27})[size], ...bytes];
   };
+  if(value instanceof Raw) return value.bytes;
   if(value === null) return [246];
   if(typeof value === 'boolean') return [value ? 245 : 244];
   if(typeof value === 'number' || typeof value === 'bigint') return value < 0 ? head(1, -1n - BigInt(value)) : head(0, value);
@@ -17,8 +22,13 @@ export function encode(value) {
   }
   if(value instanceof Uint8Array) return [...head(2, value.length), ...value];
   if(Array.isArray(value)) return [...head(4, value.length), ...value.flatMap(encode)];
-  const entries = Object.entries(value).sort(([a], [b]) => Number(a) - Number(b));
-  return [...head(5, entries.length), ...entries.flatMap(([key, field]) => [...encode(BigInt(key)), ...encode(field)])];
+  const entries = Object.entries(value).map(([key, field]) => [encode(/^\d+$/.test(key) ? BigInt(key) : key), encode(field)]);
+  entries.sort(([a], [b]) => {
+    if(a.length !== b.length) return a.length - b.length;
+    const i = a.findIndex((byte, index) => byte !== b[index]);
+    return i < 0 ? 0 : a[i] - b[i];
+  });
+  return [...head(5, entries.length), ...entries.flat(2)];
 }
 
 export function decode(input) {
@@ -39,9 +49,9 @@ export function decode(input) {
     const value = bytes.slice(offset, offset += Number(length));
     if(major === 2) return value;
     if(major === 3) return new TextDecoder().decode(value);
-    throw new Error('Unexpected fixture CBOR');
+    throw new Error('Unsupported CBOR');
   };
-  const result = read();
-  if(offset !== bytes.length) throw new Error('Trailing fixture CBOR');
-  return result;
+  const value = read();
+  if(offset !== bytes.length) throw new Error('Trailing CBOR');
+  return value;
 }

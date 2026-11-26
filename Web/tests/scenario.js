@@ -1,11 +1,12 @@
 import challenge from './challenge.js';
 import {encode, decode} from './cbor.js';
 import {createDiem} from '../dist/diem.js';
-import {exerciseHosting} from './hosting.js';
 import {exerciseProfiles} from './profiles.js';
-import {exerciseSeeds} from './seeds.js';
-import {backend as makeBackend} from './signers.js';
+import {backend as makeBackend, signers} from './signers.js';
 import {exerciseLinkCustody} from './link-custody.js';
+
+// Blah's operations in its runtime. Diem's web tests cover seeds, custody, hosting and
+// generic device linking; these check Blah's use of them through this one WASM.
 
 function check(condition, message) { if(!condition) throw new Error(message); }
 async function rejects(action) {
@@ -106,11 +107,50 @@ export async function run({engine, realm}) {
   // The optimized build must still reject tampered canonical profiles.
   const corrupt = [...removed.profile]; corrupt[corrupt.length - 1] ^= 1;
   await rejects(() => perform('inspect', {}, corrupt));
-  await exerciseHosting({diem, check, base, alice, bob, first});
   await exerciseProfiles({diem, backend, check, rejects, base, alice, first, second});
-  await exerciseSeeds({diem, check, rejects, base, absent, engine, realm});
-  await exerciseLinkCustody(diem, check, rejects, absent, {engine, realm});
+  await exerciseKinds({diem, check, base, alice});
+  await exerciseRecovery({diem, check, rejects, base, absent});
+  await exerciseLinkCustody(diem, check, rejects, absent);
   check(!('blahCall' in globalThis) && !('blahCrypto' in globalThis), 'Global bridge callbacks leaked');
   absent(alice.seed); absent(bob.seed);
   return {realm: typeof document === 'undefined' ? 'worker' : 'window', id: first.id};
+}
+
+// Domain edits keep each kind, and Diem's hosting client runs from Blah's WASM.
+async function exerciseKinds({diem, check, base, alice}) {
+  const utf8 = text => new TextEncoder().encode(text);
+  const policy = {domain: 'id.example', labelPattern: '[a-z0-9-]+', maxClaimsPerIdentity: 3,
+    maxUpdatesPerIdentityPerHour: 12, claimGraceAfterExpiry: 2_592_000,
+    proofOfWork: {algorithm: 'sha256-leading-zero-bits-v1', baseBits: 4, bitsPerShorterCharacter: 0, referenceLength: 8}};
+  const transport = async() => ({status: 200, headers: {}, body: utf8(JSON.stringify(policy))});
+  const fetched = await diem.hosting.policy('id.example', transport);
+  check(fetched.domain === 'id.example' && fetched.names.maxClaimsPerIdentity === 3, 'Hosting policy through Blah\'s runtime');
+  for(const kind of ['bot', 'channel', 'stickerSet']) {
+    const created = await diem.identityOperation({...base, kind}, alice);
+    const domains = kind === 'stickerSet' ? ['kind.id.example'] : [base.domain, 'kind.id.example'];
+    const changed = await diem.identityOperation({...base, kind, operation: 'domains', profile: created.profile, domains}, alice);
+    const info = await diem.verifyProfile(changed.profile, base.now, alice);
+    check(info.kind === kind && info.domains.join() === domains.join(), 'Domains preserve ' + kind);
+  }
+}
+
+// Recovery: the restored seed enrolls a fresh device into the Blah profile.
+async function exerciseRecovery({diem, check, rejects, base, absent}) {
+  const generated = diem.seeds.generate();
+  const identity = await diem.seeds.identity(generated.entropy);
+  const created = await diem.identityOperation({...base, operation: 'create', profile: []},
+    signers(identity, await diem.deviceKeys.generate()));
+  const next = await diem.deviceKeys.generate();
+  const recovered = signers(await diem.seeds.identity(diem.seeds.restore(generated.words.join(' ')), identity.publicKey), next);
+  const enrolled = await diem.identityOperation({...base, operation: 'enroll', profile: created.profile}, recovered);
+  check(enrolled.id === created.id && enrolled.devices.length === 2 && enrolled.devices.some(x => x.current), 'Recovery enrolls a fresh P-256 device');
+  await rejects(() => diem.identityOperation({...base, operation: 'enroll', profile: created.profile}, signers(undefined, next)));
+  const recoveredLate = await diem.identityOperation({...base, operation: 'enroll',
+    profile: created.profile, now: base.now + 200 * 86400}, recovered);
+  check(recoveredLate.expiresAt > base.now + 200 * 86400, 'Recovery renews expired profile authority');
+  const wrongIdentity = await diem.seeds.identity(diem.seeds.generate().entropy);
+  await rejects(() => diem.identityOperation({...base, operation: 'enroll', profile: created.profile},
+    signers(wrongIdentity, next)));
+  absent(generated.entropy);
+  generated.entropy.fill(0);
 }

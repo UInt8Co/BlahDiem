@@ -34,6 +34,7 @@ existing `docs.blahim.com` hostname.
 
 ## Web clients
 
-[Web/README.md](Web/README.md) describes the BridgeJS-generated WASM library,
-worker support, minimized release artifacts and reproducible build/test procedure.
-Native consumers do not depend on the web package or its JavaScript build tools.
+[Web/README.md](Web/README.md) describes the web runtime: Diem's web library
+(`Web/` in the pinned diem revision) with Blah's operations, built into one WASM and one
+JavaScript bundle, its release artifacts and its build/test procedure. Native consumers
+do not depend on the web package or its JavaScript build tools.

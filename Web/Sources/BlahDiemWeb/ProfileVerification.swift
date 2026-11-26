@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemWeb
 import JavaScriptKit
 
 /// Public profile facts. Decimal strings preserve all wire integers exactly.
@@ -144,7 +145,7 @@ import JavaScriptKit
     let pair = ApplicationWirePair(application: try Digest(bytes: id))
     return ApplicationWirePairInfo(apiID: Double(pair.apiID), apiHash: pair.apiHash)
   } catch {
-    throw JSException(message: bridgeError(error))
+    throw JSException(message: blahBridgeError(error))
   }
 }
 
@@ -152,7 +153,7 @@ import JavaScriptKit
 @JS public func verifyProfile(encoding: [UInt8], now: Double,
   crypto: JSObject) async throws(JSException) -> ProfileInfo {
   do {
-    guard let time = UInt64(exactly: now), time <= 9007199254740991 else {
+    guard let time = seconds(now) else {
       throw BlahError.invalidProfile
     }
     let profile = try await AnyBlahProfile(verifying: encoding,
@@ -176,6 +177,6 @@ import JavaScriptKit
         ProfileHomeInfo(dc: $0.dc.description, account: $0.account.map(String.init), epoch: String($0.epoch))
       }, application: application)
   } catch {
-    throw JSException(message: bridgeError(error))
+    throw JSException(message: blahBridgeError(error))
   }
 }

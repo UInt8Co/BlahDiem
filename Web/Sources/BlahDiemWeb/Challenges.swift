@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemWeb
 import JavaScriptKit
 
 /// All identifiers and timestamps are decimal strings; absent fields are nil.
@@ -107,7 +108,7 @@ import JavaScriptKit
     }
     return info
   } catch {
-    throw JSException(message: bridgeError(error))
+    throw JSException(message: blahBridgeError(error))
   }
 }
 

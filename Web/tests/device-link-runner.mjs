@@ -24,7 +24,7 @@ export async function runDeviceLinkTests(page, engine) {
     console.log(`PASS ${engine} device link ${shared ? 'SharedWorker' : 'DedicatedWorker'}`);
     await capture(engine, shared ? 'SharedWorker' : 'DedicatedWorker', result);
   }
-  console.log(`PASS ${engine} device link Window, DedicatedWorker and SharedWorker: native grants, browser responses, canonical records, request binding, bounds and rejection.`);
+  console.log(`PASS ${engine} device link Window, DedicatedWorker and SharedWorker: native grants, browser responses, Blah metadata with seed transfer, expected DC and rejection.`);
   await crossOriginLink(page.context().browser(), engine);
 }
 

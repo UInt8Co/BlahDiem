@@ -1,21 +1,16 @@
 // BridgeJS generates both sides of the ABI; this adapter only normalizes JS inputs.
+// Diem's client (seeds, device keys, hosting, device linking) comes from the pinned diem
+// checkout; Blah adds its operations and its device-link protocol.
 import {init} from './.build-embedded/plugins/PackageToJS/outputs/Package/index.js';
-import {hosting} from './hosting.js';
-import {deviceKeys, signingBackend} from './crypto-support.js';
-import {seeds} from './seeds.js';
-import {deviceLink} from './device-links.js';
+import {diemClient} from './.build-embedded/checkouts/diem/Web/client.js';
+import {bytes, validTime} from './.build-embedded/checkouts/diem/Web/bytes.js';
+import {signingBackend} from './.build-embedded/checkouts/diem/Web/crypto-support.js';
+import {blahLinkProtocol} from './device-link-protocol.js';
 
 const operations = new Set(['create', 'enroll', 'inspect', 'renew', 'account', 'home', 'domains', 'addDevice', 'removeDevice', 'prove']);
 const kinds = new Set(['user', 'channel', 'bot', 'stickerSet', 'dc']);
 const challengeKinds = new Set(['invocation', 'login', 'oauthConsent', 'accountLink', 'dcAdmin']);
 const optional = ['account', 'device', 'challenge', 'query', 'keyID', 'sessionID', 'expiresAt', 'challengeKind', 'approvedChallenge', 'domains'];
-
-function bytes(value, name, limit = 100_000) {
-  if(!(Array.isArray(value) || value instanceof Uint8Array) || value.length > limit) throw new TypeError(`Invalid ${name} bytes`);
-  const result = Array.from(value);
-  if(!result.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) throw new TypeError(`Invalid ${name} bytes`);
-  return result;
-}
 
 function backend(crypto) {
   for(const name of ['random', 'publicKey', 'sign', 'verify']) {
@@ -24,17 +19,12 @@ function backend(crypto) {
   return crypto;
 }
 
-function validTime(value) { return Number.isSafeInteger(value) && value >= 0; }
-
 /** Works in Window, DedicatedWorker and SharedWorker; no DOM or global callbacks. */
 export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.url)) {
   const {exports} = await init({module: fetch(wasmURL), getImports: () => ({})});
-  const seedAPI = seeds();
+  const diem = diemClient(exports, wasmURL, {deviceLinkProtocol: blahLinkProtocol});
   return {
-    seeds: seedAPI,
-    deviceKeys,
-    hosting: hosting(exports, bytes),
-    deviceLink: deviceLink(exports, wasmURL),
+    ...diem,
     async identityOperation(input, crypto) {
       if(!operations.has(input?.operation) || !kinds.has(input.kind) || typeof input.domain !== 'string' || input.domain.length > 253 ||
         typeof input.dcDomain !== 'string' || input.dcDomain.length > 253 ||
@@ -70,7 +60,7 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
     },
     async dcSetup(input) {
       if(!validTime(input?.now)) throw new TypeError('Invalid DC setup time');
-      const identity = await seedAPI.identity(input.seed);
+      const identity = await diem.seeds.identity(input.seed);
       return exports.dcSetup({data: bytes(input.data, 'data'),
         profile: input.profile == null ? null : bytes(input.profile, 'profile'), now: input.now,
         profileLifetime: input.profileLifetime ?? 90 * 86400,

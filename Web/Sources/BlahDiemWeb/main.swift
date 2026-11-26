@@ -1,65 +1,11 @@
 import BlahDiem
+import DiemWeb
 import JavaScriptKit
 import JavaScriptEventLoop
 
-// WebCrypto owns the keys. The shared BlahDiem/Diem implementation owns all
-// certificate, profile, purpose and wire-format rules, compiled for the browser.
+// Diem's web library supplies the WebCrypto `BrowserBackend`, the byte bridges, hosting,
+// generic device linking and their `@JS` exports; this executable adds Blah's operations.
 // The WASM target is single-threaded; each call retains its own signer.
-struct BrowserBackend: CryptoBackend, @unchecked Sendable {
-  let now: UInt64
-  let crypto: JSObject
-  func randomBytes(count: Int) -> [UInt8] { bytes(crypto.random!(count)) }
-  func makePrivateKey(_ algorithm: PublicKey.Algorithm, for purpose: PublicKey.Purpose,
-    restoring rawRepresentation: [UInt8]?) async throws -> PrivateKey {
-    if let rawRepresentation {
-      guard algorithm == .ed25519, purpose == .identity else { throw DiemError.unsupportedAlgorithm }
-      let raw = bytes(try await JSPromise(crypto.restorePublicKey!(rawRepresentation).object!)!.value)
-      return try PrivateKey(publicKey: PublicKey(purpose: purpose, algorithm: .ed25519,
-        rawRepresentation: raw), protection: .software, rawRepresentation: rawRepresentation) { message in
-        bytes(try await JSPromise(crypto.signRestored!(rawRepresentation, message).object!)!.value)
-      }
-    }
-    guard algorithm == (purpose == .identity ? .ed25519 : .p256) else { throw DiemError.unsupportedAlgorithm }
-    let role = purpose == .identity ? "identity" : "device"
-    let raw = bytes(crypto.publicKey!(role))
-    return try PrivateKey(publicKey: PublicKey(purpose: purpose, algorithm: algorithm,
-      rawRepresentation: raw), protection: .nonExportable, rawRepresentation: nil) { message in
-      let value = try await JSPromise(crypto.sign!(role, message).object!)!.value
-      return bytes(value)
-    }
-  }
-  func isValidSignature(_ signature: [UInt8], for message: [UInt8], by key: PublicKey) async throws -> Bool {
-    guard key.algorithm == .ed25519 || key.algorithm == .p256 else { throw DiemError.unsupportedAlgorithm }
-    return try await JSPromise(crypto.verify!(
-      key.rawRepresentation, message, signature).object!)!.value.boolean!
-  }
-  func makeEncryptionKey(_ algorithm: EncryptionPublicKey.Algorithm,
-    restoring rawRepresentation: [UInt8]?) async throws -> EncryptionPrivateKey {
-    guard algorithm == .p256, rawRepresentation == nil else { throw DiemError.unsupportedAlgorithm }
-    return try EncryptionPrivateKey(publicKey: EncryptionPublicKey(algorithm: .p256,
-      rawRepresentation: bytes(crypto.encryptionPublicKey!())), protection: .software,
-      rawRepresentation: nil) { box, context in
-        secretBytes(try await JSPromise(crypto.open!(box.encapsulatedKey, box.ciphertext, context).object!)!.value)
-      }
-  }
-  func seal(_ plaintext: [UInt8], to key: EncryptionPublicKey, context: [UInt8]) async throws -> SealedBox {
-    guard key.algorithm == .p256 else { throw DiemError.unsupportedAlgorithm }
-    let box = try await JSPromise(crypto.seal!(key.rawRepresentation, plaintext, context).object!)!.value.object!
-    return SealedBox(encapsulatedKey: bytes(box.encapsulatedKey), ciphertext: bytes(box.ciphertext))
-  }
-}
-
-func bytes(_ value: JSValue) -> [UInt8] {
-  let array = JSObject.global.Array.from(value)
-  return (0..<Int(array.length.number!)).map { UInt8(array[$0].number!) }
-}
-
-private func secretBytes(_ value: JSValue) -> [UInt8] {
-  let array = value.object!
-  defer { _ = array.fill!(0) }
-  return (0..<Int(array.length.number!)).map { UInt8(array[$0].number!) }
-}
-
 
 /// Decimal strings preserve 64-bit identifiers across the JavaScript boundary.
 @JS public struct IdentityRequest {
@@ -236,7 +182,7 @@ JavaScriptEventLoop.installGlobalExecutor()
         expiresAt: Double(identity.profile.validity.expiresAt),
         devices: deviceInfo(identity))
     } catch {
-      throw JSException(message: bridgeError(error))
+      throw JSException(message: blahBridgeError(error))
     }
 }
 
@@ -248,35 +194,18 @@ func deviceInfo(_ identity: some Identity) -> [DeviceInfo] {
   }
 }
 
+/// The JavaScript error code for a failed Blah operation: a ``BlahError`` case name, else
+/// Diem's code (see DiemWeb's `bridgeError`).
 // Explicit codes avoid pulling Swift reflection into the browser binary.
-func bridgeError(_ error: any Error) -> String {
-  if let error = error as? JSException { return error.description }
-  if let error = error as? BlahError {
-    switch error {
-    case .invalidProfile: return "invalidProfile"
-    case .invalidName: return "invalidName"
-    case .wrongHome: return "wrongHome"
-    case .invalidChallenge: return "invalidChallenge"
-    case .challengeExpired: return "challengeExpired"
-    case .wrongNamespace: return "wrongNamespace"
-    case .invalidDeviceLink: return "invalidDeviceLink"
-    }
+func blahBridgeError(_ error: any Error) -> String {
+  guard let error = error as? BlahError else { return bridgeError(error) }
+  switch error {
+  case .invalidProfile: return "invalidProfile"
+  case .invalidName: return "invalidName"
+  case .wrongHome: return "wrongHome"
+  case .invalidChallenge: return "invalidChallenge"
+  case .challengeExpired: return "challengeExpired"
+  case .wrongNamespace: return "wrongNamespace"
+  case .invalidDeviceLink: return "invalidDeviceLink"
   }
-  if let error = error as? DiemError {
-    switch error {
-    case .invalidEncoding: return "invalidEncoding"
-    case .invalidKey: return "invalidKey"
-    case .invalidSignature: return "invalidSignature"
-    case .unsupportedAlgorithm: return "unsupportedAlgorithm"
-    case .invalidValidity: return "invalidValidity"
-    case .invalidDomain: return "invalidDomain"
-    case .expired: return "expired"
-    case .identityMismatch: return "identityMismatch"
-    case .deviceNotListed: return "deviceNotListed"
-    case .identityKeyRequired: return "identityKeyRequired"
-    case .encryptionFailed: return "encryptionFailed"
-    case .decryptionFailed: return "decryptionFailed"
-    }
-  }
-  return "cryptoBackendFailed"
 }

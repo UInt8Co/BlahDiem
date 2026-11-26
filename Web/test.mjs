@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium, webkit} from '@playwright/test';
 import assert from 'node:assert/strict';
+// Blah's operations in its one WASM; Diem's web tests cover the generic runtime.
 const supported = [chromium, webkit];
 const requested = process.argv.slice(2);
 const engines = requested.length ? requested.map(name => {
@@ -44,7 +45,7 @@ try {
     ]), engine.name());
     if(windowResult.error) throw new Error(windowResult.error);
     assert.equal(windowResult.realm, 'window');
-    console.log(`PASS ${engine.name()} identity/custody Window`);
+    console.log(`PASS ${engine.name()} Blah operations Window`);
     for(const shared of [false, true]) {
       const result = await page.evaluate(({shared, engine}) => new Promise((resolve, reject) => {
         const worker = shared ? new SharedWorker('/tests/worker.js', {type: 'module'}) : new Worker('/tests/worker.js', {type: 'module'});
@@ -57,10 +58,9 @@ try {
         port.postMessage({engine});
       }), {shared, engine: engine.name()});
       assert.equal(result.realm, 'worker');
-      console.log(`PASS ${engine.name()} identity/custody ${shared ? 'SharedWorker' : 'DedicatedWorker'}`);
+      console.log(`PASS ${engine.name()} Blah operations ${shared ? 'SharedWorker' : 'DedicatedWorker'}`);
     }
-    const persistence = engine === webkit ? 'IndexedDB persistence in Window and DedicatedWorker, SharedWorker DataCloneError canary and in-memory custody' : 'IndexedDB persistence in all realms';
-    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: profile hosting, PoW, cancellation and transport bounds, public profile verification and lapse reporting, hosted identity kinds, all challenge/proof kinds, DC setup/recovery, seed custody, non-extractable P-256 signing, ${persistence}, concurrent signers, devices and rejection.`);
+    console.log(`PASS ${engine.name()} Window, DedicatedWorker and SharedWorker: Blah identity operations on all hosted kinds, Blah profile and application verification, all challenge/proof kinds, DC setup/recovery and discovery, seed recovery, Blah device links with metadata, hosting through Blah's runtime, concurrent signers and rejection.`);
     await (await import('./tests/device-link-runner.mjs')).runDeviceLinkTests(page, engine.name());
     await browser.close(); browser = undefined;
   }

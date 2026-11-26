@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemWeb
 import JavaScriptKit
 
 @JS public struct DCSetupRequest {
@@ -37,7 +38,7 @@ import JavaScriptKit
 /// Creates or renews a DC profile entirely in the operator's browser.
 @JS public func dcSetup(input: DCSetupRequest, crypto: JSObject) async throws(JSException) -> DCSetupResult {
   do {
-    guard let now = UInt64(exactly: input.now), now <= 9007199254740991,
+    guard let now = seconds(input.now),
       let profileLifetime = UInt64(exactly: input.profileLifetime), profileLifetime > 0,
       let deviceLifetime = UInt64(exactly: input.deviceLifetime), deviceLifetime >= profileLifetime,
       deviceLifetime <= 9007199254740991 - now else {
@@ -63,6 +64,6 @@ import JavaScriptKit
     return DCSetupResult(id: identity.id.description, profile: identity.profile.encoding,
       expiresAt: Double(identity.profile.validity.expiresAt), devices: deviceInfo(identity))
   } catch {
-    throw JSException(message: bridgeError(error))
+    throw JSException(message: blahBridgeError(error))
   }
 }

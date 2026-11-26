@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemWeb
 import JavaScriptKit
 
 @JS public struct DCEndpointInfo {
@@ -45,7 +46,7 @@ import JavaScriptKit
 @JS public func verifyDCProfile(domain: String, encoding: [UInt8], now: Double,
   crypto: JSObject) async throws(JSException) -> DCDiscoveryResult {
   do {
-    guard let time = UInt64(exactly: now), time <= 9007199254740991 else {
+    guard let time = seconds(now) else {
       throw BlahError.invalidProfile
     }
     let dc = try DCProfile(encoding: encoding)
@@ -61,6 +62,6 @@ import JavaScriptKit
         tls: $0.tls, transport: $0.transport == .webSocket ? "webSocket" : "tcp", path: $0.path) },
       transportPublicKey: dc.transportPublicKey)
   } catch {
-    throw JSException(message: bridgeError(error))
+    throw JSException(message: blahBridgeError(error))
   }
 }

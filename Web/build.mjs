@@ -1,3 +1,7 @@
+// Builds Blah's runtime into dist/: one BridgeJS WASM (Diem's web library and Blah's
+// operations) minimized with Binaryen, the bundled JS entry and link worker, declarations,
+// notices, a manifest and checksums. Diem's Swift and JavaScript come from the pinned diem
+// checkout that `swift package resolve` creates in .build-embedded.
 import {execFileSync} from 'node:child_process';
 import {mkdir, readFile, writeFile, copyFile, rm} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
@@ -25,6 +29,7 @@ if(!optimizerVersion.includes('version 133 ')) throw new Error('Install pinned B
 const swiftVersion = run(swift, ['--version'], {encoding: 'utf8'}).split('\n')[0];
 if(!/Swift version 6\.4(?:\.0)?\s/.test(swiftVersion)) throw new Error('Use Swift 6.4 with the matching WASM SDK.');
 const packageArgs = ['package', '--package-path', 'Web', '--scratch-path', scratch, '--swift-sdk', sdk, '--force-resolved-versions'];
+// Resolving first creates the checkout that the DiemWeb target and the JS imports read.
 run(swift, [...packageArgs, 'resolve'], {stdio: 'inherit'});
 const diem = `${scratch}/checkouts/diem`;
 const pins = JSON.parse(await readFile(web + 'Package.resolved', 'utf8')).pins;
@@ -34,7 +39,7 @@ if(git(['rev-parse', 'HEAD']).trim() !== base) throw new Error('Unexpected Diem 
 if(git(['status', '--porcelain']).trim()) {
   throw new Error('Diem checkout differs from its pinned revision. Use a clean Web/.build-embedded.');
 }
-run(process.execPath, ['--test', 'Web/tests/seeds.test.mjs', 'Web/tests/device-links.test.mjs'], {stdio: 'inherit'});
+run(process.execPath, ['--test', 'Web/tests/device-link-protocol.test.mjs'], {stdio: 'inherit'});
 run(swift, [...packageArgs, '-j', '3', '-Xswiftc', '-Osize', '-Xswiftc', '-gnone',
   'js', '-c', 'release', '--no-optimize'], {stdio: 'inherit'});
 await rm(output, {recursive: true, force: true});
@@ -43,12 +48,15 @@ await mkdir(output, {recursive: true});
 run(optimizer, [`${generated}BlahDiemWeb.wasm`, '--strip-dwarf', '--strip-debug', '-o', `${output}stripped.wasm`]);
 run(optimizer, [`${output}stripped.wasm`, '-Oz', '--strip-producers', '-o', `${output}diem.wasm`]);
 await rm(`${output}stripped.wasm`);
-await build({entryPoints: [`${web}runtime.js`], outfile: `${output}diem.js`, bundle: true,
-  format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'none'});
-await build({entryPoints: [`${web}device-link-worker.js`], outfile: `${output}device-link-worker.js`, bundle: true,
-  format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'none'});
+// Diem's modules import packages by name; resolve them from this package's node_modules.
+const bundle = {bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true,
+  legalComments: 'none', nodePaths: [`${web}node_modules`]};
+await build({entryPoints: [`${web}runtime.js`], outfile: `${output}diem.js`, ...bundle});
+await build({entryPoints: [`${web}device-link-worker.js`], outfile: `${output}device-link-worker.js`, ...bundle});
 await copyFile(`${generated}bridge-js.d.ts`, `${output}bridge-js.d.ts`);
 await copyFile(`${web}diem.d.ts`, `${output}diem.d.ts`);
+// Diem's generic declarations, which diem.d.ts imports.
+await writeFile(`${output}diem-web.d.ts`, await readFile(`${diem}/Web/diem.d.ts`)); // The checkout is read-only.
 await copyFile(`${root}LICENSE`, `${output}LICENSE`);
 const swiftResources = JSON.parse(run(swift, ['-print-target-info'], {encoding: 'utf8'})).paths.runtimeResourcePath;
 const notices = await Promise.all([resolve(swiftResources, '../../share/swift/LICENSE.txt'), `${scratch}/checkouts/JavaScriptKit/LICENSE`, `${web}node_modules/@bjorn3/browser_wasi_shim/LICENSE-MIT`, `${web}node_modules/@hpke/core/LICENSE`, `${web}node_modules/@hpke/core/../common/LICENSE`, `${web}node_modules/@noble/curves/LICENSE`, `${web}node_modules/@noble/curves/../hashes/LICENSE`, `${diem}/LICENSE`].map(path => readFile(path, 'utf8')));
@@ -58,7 +66,7 @@ await writeFile(`${output}package.json`, JSON.stringify({name: '@blahim/diem-web
   license: 'MIT', types: './diem.d.ts', exports: {'.': {types: './diem.d.ts', default: './diem.js'},
     './diem.wasm': './diem.wasm', './device-link-worker.js': './device-link-worker.js'}}, null, 2) + '\n');
 const files = {};
-for(const name of ['diem.js', 'device-link-worker.js', 'diem.wasm', 'diem.d.ts', 'bridge-js.d.ts', 'package.json', 'LICENSE', 'THIRD_PARTY_LICENSES', 'README.md']) {
+for(const name of ['diem.js', 'device-link-worker.js', 'diem.wasm', 'diem.d.ts', 'diem-web.d.ts', 'bridge-js.d.ts', 'package.json', 'LICENSE', 'THIRD_PARTY_LICENSES', 'README.md']) {
   const bytes = await readFile(output + name);
   files[name] = {bytes: bytes.length, sha256: hash(bytes)};
   if(name.endsWith('.js') || name.endsWith('.wasm')) {
@@ -73,8 +81,10 @@ for(const name of ['diem.js', 'device-link-worker.js', 'diem.wasm', 'diem.d.ts',
 }
 // Budgets include recovery words, HPKE and Ed25519 public derivation.
 // The worker also derives public identity keys when checking transferred seeds.
-if(files['diem.wasm'].bytes > 650_000 || files['diem.wasm.br'].bytes > 215_000 ||
-  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 142_000) {
+// Both bundles carry the glue for every export, including DiemWeb's generic
+// (ProfileRecord) profile and device-link exports, which the WASM also links.
+if(files['diem.wasm'].bytes > 690_000 || files['diem.wasm.br'].bytes > 220_000 ||
+  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 152_000) {
   throw new Error('Web artifact exceeds its size budget; inspect before releasing.');
 }
 const source = {repository: 'https://github.com/UInt8Co/BlahDiem',
