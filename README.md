@@ -2,19 +2,22 @@
 
 BlahDiem carries Blah's profiles and proofs on [Diem](https://github.com/UInt8Co/diem)
 identities: user, bot, channel, sticker-set, DC and application profiles, the DC challenges that
-devices sign, QR device-link records with optional seed transfer, and the client cache namespace. Blah clients and DCs share it. It is
-Foundation-free and runs on any Diem `CryptoBackend`.
+devices sign, Blah's rules for Diem's QR device linking, and the client cache namespace. Blah
+clients and DCs share it. It is Foundation-free and runs on any Diem `CryptoBackend`.
 
-Blah profile types adopt Diem's profile protocols and sign their fields directly in the
-Diem profile. Other Blah records are canonical CBOR maps with unsigned integer field
-keys and fixed numeric tags. Types expose their field numbers as public static
-`cborKey…` constants. Decoders validate required fields and accept unknown integer
-keys; arrays contain lists only. The tuple encoding is not accepted. Every profile
-domain is a username candidate.
+Diem owns the integer keys of its records; Blah's application ID is `com.blahim`. Blah
+profile types adopt Diem's profile protocols and sign their kind and fields as a map under
+`com.blahim` in the Diem profile, and a proof's `com.blahim` value is the signed
+challenge's record. Blah's own records are canonical CBOR maps with unsigned integer field
+keys and fixed numeric tags. Types expose their field numbers, including those inside the
+`com.blahim` map, as public static `cborKey…` constants. Decoders validate required fields
+and accept unknown keys; arrays contain lists only. Every profile domain is a username
+candidate.
 
 Name claims use Diem’s profile-hosting client with Blah’s native domain rules.
-See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md).
-Requires Swift 6.4 or later. Run `swift test` to check the contracts. The package is
+See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md)
+for Blah's wire layout and rules. Requires Swift 6.4 or later. Run `swift test` to check
+the contracts. The package is
 licensed under MIT; see [LICENSE](LICENSE).
 
 ## API documentation

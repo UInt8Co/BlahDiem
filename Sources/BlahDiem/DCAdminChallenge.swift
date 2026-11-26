@@ -24,7 +24,7 @@ public struct DCAdminChallenge: BlahStatement {
 
   public static let maximumDocumentBytes = 131_072
 
-  private var extensionFields: [UInt64: CBOR] = [:]
+  private var extensionFields = CBOR.Record()
 
   public let dc: DCAddress
   public let nonce: [UInt8]
@@ -53,10 +53,11 @@ public struct DCAdminChallenge: BlahStatement {
     self.document = document
   }
 
-  public init(encoding: [UInt8]) throws(BlahError) {
+  /// Decodes a statement from its proof value.
+  public init(value: CBOR) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(
-      encoding, tag: .dcAdmin, requiredKeys: Self.cborKeyTag..<(Self.cborKeyDocument + 1), error: e)
+    let a = try value.record(
+      tag: .dcAdmin, requiredKeys: Self.cborKeyTag..<(Self.cborKeyDocument + 1), error: e)
     guard let operation = Operation(rawValue: try a[Self.cborKeyOperation]!.unsigned(e)) else {
       throw e
     }
@@ -66,10 +67,11 @@ public struct DCAdminChallenge: BlahStatement {
       expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), operation: operation,
       revision: a[Self.cborKeyRevision]!.unsigned(e),
       document: a[Self.cborKeyDocument]!.bytes(e))
-    extensionFields = a.filter { $0.key > Self.cborKeyDocument }
+    extensionFields = a.extensions(above: Self.cborKeyDocument)
   }
 
-  public var encoding: [UInt8] {
+  /// The proof value: the canonical record.
+  public var value: CBOR {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.dcAdmin.rawValue), Self.cborKeyVersion: .unsigned(1),
@@ -78,8 +80,8 @@ public struct DCAdminChallenge: BlahStatement {
         Self.cborKeyOperation: .unsigned(operation.rawValue),
         Self.cborKeyRevision: .unsigned(revision),
         Self.cborKeyDocument: .bytes(document),
-      ], extensions: extensionFields
-    ).encoded
+      ], retaining: extensionFields
+    )
   }
 
   /// Requires a live challenge from the identity's home DC.

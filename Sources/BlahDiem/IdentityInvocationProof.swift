@@ -11,7 +11,7 @@ public struct InvocationChallenge: Hashable, Sendable {
   public static let cborKeyTransportKeyID: UInt64 = 6
   public static let cborKeySessionID: UInt64 = 7
 
-  private var extensionFields: [UInt64: CBOR] = [:]
+  private var extensionFields = CBOR.Record()
 
   public let domain: DomainName
   public let nonce: [UInt8]
@@ -46,7 +46,7 @@ public struct InvocationChallenge: Hashable, Sendable {
       expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), dc: a[Self.cborKeyDC]!.digest(e),
       transportKeyID: Int64(bitPattern: a[Self.cborKeyTransportKeyID]!.unsigned(e)),
       sessionID: a[Self.cborKeySessionID]!.unsigned(e))
-    extensionFields = a.filter { $0.key > Self.cborKeySessionID }
+    extensionFields = a.extensions(above: Self.cborKeySessionID)
   }
 
   public var encoding: [UInt8] {
@@ -58,7 +58,7 @@ public struct InvocationChallenge: Hashable, Sendable {
         Self.cborKeyExpiresAt: .unsigned(expiresAt), Self.cborKeyDC: .bytes(dc.bytes),
         Self.cborKeyTransportKeyID: .unsigned(UInt64(bitPattern: transportKeyID)),
         Self.cborKeySessionID: .unsigned(sessionID),
-      ], extensions: extensionFields
+      ], retaining: extensionFields
     ).encoded
   }
 }
@@ -72,7 +72,7 @@ public struct InvocationStatement: BlahStatement {
   public static let cborKeyDigestAlgorithm: UInt64 = 3
   public static let cborKeyPayloadDigest: UInt64 = 4
 
-  private var extensionFields: [UInt64: CBOR] = [:]
+  private var extensionFields = CBOR.Record()
 
   public let challenge: InvocationChallenge
   public let payloadDigest: [UInt8]
@@ -83,26 +83,28 @@ public struct InvocationStatement: BlahStatement {
     payloadDigest = SHA2.sha512(payload)
   }
 
-  public init(encoding: [UInt8]) throws(BlahError) {
+  /// Decodes a statement from its proof value.
+  public init(value: CBOR) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(
-      encoding, tag: .invocationStatement,
+    let a = try value.record(
+      tag: .invocationStatement,
       requiredKeys: Self.cborKeyTag..<(Self.cborKeyPayloadDigest + 1), error: e)
     // Digest algorithm code 1 is SHA-512.
     guard a[Self.cborKeyDigestAlgorithm]! == .unsigned(1) else { throw e }
     challenge = try InvocationChallenge(encoding: a[Self.cborKeyChallenge]!.bytes(e))
     payloadDigest = try a[Self.cborKeyPayloadDigest]!.bytes(e, count: 64)
-    extensionFields = a.filter { $0.key > Self.cborKeyPayloadDigest }
+    extensionFields = a.extensions(above: Self.cborKeyPayloadDigest)
   }
 
-  public var encoding: [UInt8] {
+  /// The proof value: the canonical record.
+  public var value: CBOR {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.invocationStatement.rawValue),
         Self.cborKeyVersion: .unsigned(1), Self.cborKeyChallenge: .bytes(challenge.encoding),
         Self.cborKeyDigestAlgorithm: .unsigned(1), Self.cborKeyPayloadDigest: .bytes(payloadDigest),
-      ], extensions: extensionFields
-    ).encoded
+      ], retaining: extensionFields
+    )
   }
 
   /// Whether this statement authorizes exactly `payload`.

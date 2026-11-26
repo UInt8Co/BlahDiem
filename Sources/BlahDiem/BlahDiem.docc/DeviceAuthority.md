@@ -28,48 +28,72 @@ identities and generate P-256 devices: Secure Enclave on iOS, non-extractable We
 on the web. WebCrypto keys use `KeyProtection.nonExportable`, which makes no hardware
 guarantee. Device private keys are never exported or transferred. Applications persist
 platform key references or CryptoKey objects. Each device key serves one session.
-Wire tags 14–16 are retired and never reused.
+
+## Wire
+
+Diem owns every integer key of its records. Blah's application ID is `com.blahim`
+(``ApplicationID/blah``), and Blah writes exactly two Diem fields under it:
+
+- **Profile content**: Diem's keys 0–9 (9 holds the domains) and `"com.blahim"`, a map
+  of Blah's integer keys. Key 0 is the profile kind (1 user, 2 channel, 3 bot,
+  4 sticker set, 5 DC, 6 application). User, bot, channel and sticker-set maps hold the
+  ``Home`` or null at key 1. A DC map holds client endpoints at 2, BIDCOM endpoints at 3,
+  the transport key at 4 and the namespace generation at 5; an application map holds the
+  name at 2, download URL 3, bot 4, OAuth 5, push 6 and versions 7. Each type's
+  `cborKey…` constants name these keys inside the map.
+- **Proofs**: the proof's `"com.blahim"` value is the signed statement's record, so a
+  ``BlahProof``'s `statement.encoding` is exactly the bytes the DC issued.
+
+Decoders ignore unknown keys inside Blah's map, and publishing Blah content replaces the
+whole map: `Identity.updating` signs only what the content holds. Other applications'
+fields and newer Diem keys are kept, as Diem's publishing rules require, and renewing or
+changing devices re-signs everything verbatim.
+
+Blah's own records — the challenges and statements, ``InvocationChallenge`` and
+``ClientNamespace`` — are canonical CBOR maps with a fixed numeric tag at key 0 and
+version 1 at key 1, and expose their field numbers as `cborKey…` constants. Decoders
+validate required fields and keep unknown integer keys and application fields, so a
+statement re-encodes to the bytes it was decoded from. Tags 14–20 are retired and never
+reused; device-link records are Diem's.
 
 ## Linking another device
 
-The new device creates a non-exportable P-256 signing key and a fresh P-256 encryption key. Its
-``DeviceLinkRequest`` goes to the DC; its ``DeviceLinkCode`` travels only in the QR
-code's `blah` parameter. The approving device checks `DeviceLinkCode.matches(_:)`
-against the received bytes before decoding the request, then checks that the new
-device can verify both its identity and device signing algorithms before certifying it.
-Labels are untrusted display text. Cross-platform identities use Ed25519 explicitly;
-native creation continues to default to ML-DSA-65.
+Blah links devices with Diem's QR device linking; see
+[Linking a device](https://github.com/UInt8Co/diem/blob/main/Sources/Diem/Diem.docc/Diem.md#linking-a-device)
+for the records, the code's binding and the checks Diem makes. Blah adds its own rules:
 
-Approval certifies the new signing key in the identity's current generation. The
-approving device saves and publishes that signed revision through its existing profile
-publisher before sending a response. The DC learns the revision through its normal
-profile fetch, independently of profile hosting. Linking cannot allocate an account.
+- The code travels in the QR URL's `blah` parameter. Cross-platform identities use
+  Ed25519 explicitly; the new device's key is a non-exportable P-256 key.
+- The approving device saves and publishes the revision certifying the new device
+  through its existing profile publisher before sending a response. The DC learns the
+  revision through its normal profile fetch. Linking cannot allocate an account.
+- A grant is accepted only for a user profile whose ``Home`` is active, has an allocated
+  account and, when opening, is the DC the new device expects. Opening without an
+  expected DC is ``BlahError/wrongHome``: a response cannot establish which DC the client
+  meant to connect to.
+- Blah's opaque `metadata`, at most 16,384 bytes, travels as bytes in the grant's
+  `com.blahim` field, only with seed transfer, and carries no authority.
 
-``DeviceLinkGrant`` carries those exact published bytes, a listed domain, and optionally
-a Diem `SealedIdentitySeed` at key 4 for the new device. Opaque application metadata is allowed only
-with seed transfer, and carries no authority. ``DeviceLinkContext`` binds the response
-to the request digest and QR secret as both HPKE info and associated data. The secret
-never goes to the DC. Opening requires a live user profile, an active home at the expected
-DC with an allocated account, a listed domain, and certification of the requested device
-in the current generation. Opening re-derives the profile's identity from the transferred seed.
-
-Any opening failure ends the link session. After success the caller stores custody
-before completing sign-in with a proof from the new device. Account password checks still
-apply. `DeviceLinkResponse.Opened.seed` is optional; the device key stays in its platform store.
-The web package's README describes its opaque session and custody API.
+``DeviceLinkResponse/seal(_:for:code:using:)`` and
+``DeviceLinkResponse/open(_:recipientKey:request:code:expectedDC:at:using:)`` apply
+these rules to Diem's `seal` and `open` with ``AnyBlahProfile``; ``DeviceLinkGrant``
+carries the metadata. Any opening failure ends the
+link session. After success the caller stores custody before completing sign-in with a
+proof from the new device; account password checks still apply. The web package's README
+describes its opaque session and custody API.
 
 ## Profiles
 
-Each Blah profile type conforms to ``BlahProfile``, a Diem `DomainNamedProfile`. Its
-fields are signed directly in the Diem profile content: the domains that serve it in
-Diem's standard domains field, and from Diem's first application key a profile kind
-followed by that kind's fields. Each type decodes only its own kind;
-``AnyBlahProfile`` decodes any. A type's `Content` is what the publisher edits, and
+Each Blah profile type conforms to ``BlahProfile``, a Diem `DomainNamedProfile` that
+owns the `com.blahim` field. Its fields are signed directly in the Diem profile content:
+the domains that serve it in Diem's standard domains field, and its kind and that kind's
+fields in Blah's map (see <doc:DeviceAuthority#Wire>). Each type decodes only its own
+kind; ``AnyBlahProfile`` decodes any. A type's `Content` is what the publisher edits, and
 `BasicIdentity` signs it as the next revision.
 
-Use ``AnyBlahProfile/init(verifying:using:)`` for public profiles returned by a DC.
-It decodes Blah's fields and calls Diem's verification at the profile's `notBefore`,
-so a stored profile can still verify after expiry. Check `profile.validity.contains(now)`
+Use Diem's `init(verifying:using:)` for public profiles returned by a DC, such as
+`AnyBlahProfile(verifying:using:)`. It decodes Blah's fields and verifies at the
+profile's `notBefore`, so a stored profile can still verify after expiry. Check `profile.validity.contains(now)`
 to determine whether its window is current. This performs no domain binding; callers
 pin the expected identity and retain monotonic generation/revision floors.
 
@@ -106,19 +130,18 @@ Derived IDs start at `0x40000000`, above DC-local legacy IDs.
 
 ## Profile hosting
 
-BlahDiem re-exports `DiemProfileHostingClient`. Supply its HTTP transport and solver;
-use ``AnyBlahProfile/Content/replacingDomains(_:)`` to preserve the profile kind and
-all other fields when preparing a claim or release:
+BlahDiem re-exports `DiemProfileHostingClient`. Supply its HTTP transport and solver.
+Each profile type's `content(_:replacingDomains:)`, such as
+``AnyBlahProfile/content(_:replacingDomains:)``, preserves the profile kind and all
+other fields when Diem's hosting client prepares a claim or release:
 
 ```swift
-let claim = try await identity.claiming(labels: ["alice"], at: host, solver: solver) {
-  try $0.replacingDomains($1)
-}
+let claim = try await identity.claiming(labels: ["alice"], at: host, solver: solver)
 // Store the signed revision before publication; retry unanswered PUTs with these bytes.
 try await host.publish(claim, solver: solver)
 ```
 
-The same transform works with `identity.releasing(labels:at:transform:)`. Users, bots
+`identity.releasing(labels:at:)` works the same way. Users, bots
 and channels may have no domains; a DC must retain at least one discovery domain.
 A sticker set requires exactly one: replace its short name with `identity.updating`
 instead of appending another name or removing its last name. A full release through
@@ -127,8 +150,11 @@ case separately. Planning is only a discovery hint; the host decides ownership.
 
 ## Proofs
 
-A DC issues a ``BlahStatement`` — a login, invocation or approval challenge — and a device
-signs it with `Identity.prove(_:)`, which returns a ``BlahProof``, a Diem `Proof`. Before signing, the statement checks
-that it is live, from the identity's home and for this identity and device. An approval is
+A DC issues a ``BlahStatement`` — a login, invocation or approval challenge, a Diem
+`Statement` of `com.blahim` — and a device signs it with `Identity.prove(_:)`, which
+returns a ``BlahProof``, Diem's `StatementProof`. Before signing, Blah's `prove` checks
+that the statement is live (it expires within 120 seconds, else
+``BlahError/challengeExpired``), from the identity's home and for this identity and
+device. An approval is
 signed only when it equals what the user reviewed. The DC verifies the ``BlahProof``
 against the identity's current profile.

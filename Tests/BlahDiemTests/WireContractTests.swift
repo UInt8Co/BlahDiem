@@ -1,7 +1,8 @@
 import BlahDiem
 import Testing
 
-/// Blah records keep fixed numeric tags and integer field keys.
+/// Blah records keep fixed numeric tags and integer field keys; in Diem records, Blah's
+/// fields sit under `com.blahim`.
 @Suite struct WireContractTests {
   let backend = TestBackend()
 
@@ -27,6 +28,11 @@ import Testing
       dc: destination, authKeyID: 42, sessionID: 73)
     let proof = try await identity.prove(challenge)
     try await proof.verify(against: identity.profile, using: backend)
+    // The proof's only application value is the challenge record the DC issued.
+    let signed = try CBOR(decoding: proof.record.signedMessage.message).recordValue(requiredKeys: 0..<4)
+    #expect(signed[0] == .text("Diem/proof") && signed[1] == .unsigned(4))
+    #expect(signed.applications == [ApplicationID.blah: try CBOR(decoding: challenge.encoding)])
+    #expect(try BlahProof<LoginChallenge>(encoding: proof.encoding).statement.encoding == challenge.encoding)
   }
 
   @Test func challengeTagsAndPositionsAreExact() throws {
@@ -40,12 +46,10 @@ import Testing
     #expect(try LoginChallenge(encoding: login.encoding) == login)
     var renamed = fields
     renamed[0] = .text("Blah/login")
-    #expect(throws: BlahError.invalidChallenge) {
-      try LoginChallenge(encoding: CBOR.map(Dictionary(uniqueKeysWithValues: renamed.map { (.unsigned($0.key), $0.value) })).encoded)
-    }
+    #expect(throws: BlahError.invalidChallenge) { try LoginChallenge(encoding: renamed.value.encoded) }
     var uppercase = fields
     uppercase[8] = .text("One.example")
-    #expect(throws: BlahError.invalidChallenge) { try LoginChallenge(encoding: CBOR.record(uppercase).encoded) }
+    #expect(throws: BlahError.invalidChallenge) { try LoginChallenge(encoding: uppercase.value.encoded) }
 
     let invocation = try InvocationChallenge(
       domain: DomainName("alice.one.example"), nonce: Fixture.nonce, expiresAt: 5, dc: Fixture.dcID,
@@ -61,9 +65,17 @@ import Testing
     #expect(
       try CBOR(decoding: UserProfile.fields(for: user).encoding) == .map([
         .unsigned(9): .array([.text("a.example")]),
-        .unsigned(16): .unsigned(1),
-        .unsigned(17): .map([.unsigned(0): .bytes(Fixture.dcID.bytes), .unsigned(1): .unsigned(1), .unsigned(2): .unsigned(TestBackend.start + 3600), .unsigned(3): .unsigned(1_000_001)]),
+        .text("com.blahim"): .map([
+          .unsigned(0): .unsigned(1),
+          .unsigned(1): .map([.unsigned(0): .bytes(Fixture.dcID.bytes), .unsigned(1): .unsigned(1), .unsigned(2): .unsigned(TestBackend.start + 3600), .unsigned(3): .unsigned(1_000_001)]),
+        ]),
       ]))
+    let dc = DCProfile.Content(domains: [try DomainName("dc.example")],
+      endpoints: [.init(host: "dc.example", port: 443, tls: true)], bidcomEndpoints: [],
+      transportPublicKey: "rsa", namespaceGeneration: 3)
+    let dcFields = try DCProfile.fields(for: dc).blah
+    #expect(dcFields[0] == .unsigned(5) && dcFields[4] == .text("rsa") && dcFields[5] == .unsigned(3))
+    #expect(Set(dcFields.fields.keys) == [0, 2, 3, 4, 5] && dcFields.applications.isEmpty)
 
     let identity = try await BasicIdentity<UserProfile>(user, using: backend)
     let namespace = try ClientNamespace(profile: identity.profile, dc: Fixture.dc, generation: 11)
@@ -91,30 +103,39 @@ import Testing
       dc: Fixture.dc, authKeyID: 42, sessionID: 73)
     var fields = try CBOR(decoding: challenge.encoding).recordValue(requiredKeys: 0..<12)
     fields[100] = .text("future")
-    let encoding = CBOR.record(fields).encoded
+    fields[try ApplicationID("org.example.future")] = .bool(true)
+    let encoding = fields.value.encoded
     let decoded = try LoginChallenge(encoding: encoding)
     #expect(decoded.encoding == encoding)
     let proof = try await identity.prove(decoded)
-    #expect(proof.data == encoding)
+    #expect(proof.value.encoded == encoding && proof.statement.encoding == encoding)
     try await proof.verify(against: identity.profile, using: backend)
-    fields.removeValue(forKey: 3)
-    #expect(throws: BlahError.invalidChallenge) { try LoginChallenge(encoding: CBOR.record(fields).encoded) }
+    fields[3] = nil
+    #expect(throws: BlahError.invalidChallenge) { try LoginChallenge(encoding: fields.value.encoded) }
   }
 
   @Test func profilesAcceptUnknownFields() async throws {
     let backend = TestBackend()
     let content = HostedContent(home: Fixture.home(), domains: [try DomainName("any.example")])
+    let other = try ApplicationID("org.example.other")
     var fields = try UserProfile.fields(for: content)
-    var home = try fields.application[17]!.recordValue(requiredKeys: 0..<4)
+    var home = try fields.blah[1]!.recordValue(requiredKeys: 0..<4)
     home[100] = .bool(true)
-    fields.application[17] = .record(home)
-    fields.application[100] = .null
+    fields.blah[1] = home.value
+    fields.blah[100] = .null
+    fields.applications[other] = .text("kept")
     let raw = try await BasicIdentity<ProfileRecord>(fields, using: backend)
     let profile = try UserProfile(encoding: raw.profile.encoding)
     #expect(profile.content == content)
     // Renewal re-signs the fields it does not interpret.
     var identity = try await BasicIdentity<UserProfile>(profile: profile,
       deviceKey: raw.deviceKey, identityKey: raw.identityKey, using: backend)
-    #expect(try await identity.renew().record.fields.application[100] == .null)
+    #expect(try await identity.renew().record.fields == fields)
+    // Publishing Blah content replaces Blah's field and keeps other applications'.
+    var next = content
+    next.home?.account = 7
+    let updated = try await identity.update(next).record.fields
+    #expect(updated.applications[other] == .text("kept"))
+    #expect(try updated.blah[100] == nil && updated.blah == UserProfile.fields(for: next).blah)
   }
 }

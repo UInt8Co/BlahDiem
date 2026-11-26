@@ -32,7 +32,7 @@ import Testing
       let any = try await AnyBlahProfile(verifying: identity.profile.encoding, using: backend)
       #expect(any.content == .application(content) && any.home == nil)
       #expect(try AnyBlahProfile.fields(for: .application(content)) == ApplicationProfile.fields(for: content))
-      #expect(identity.profile.record.fields.application[ApplicationProfile.cborKeyKind] == .unsigned(6))
+      #expect(identity.profile.record.fields.blah[ApplicationProfile.cborKeyKind] == .unsigned(6))
       var next = content
       next.versions = []
       #expect(try await identity.update(next).content.versions == [])
@@ -97,17 +97,17 @@ import Testing
     var cases: [ProfileFields] = []
     for key in ApplicationProfile.cborKeyName...ApplicationProfile.cborKeyVersions {
       var missing = fields
-      missing.application[key] = nil
+      missing.blah[key] = nil
       cases.append(missing)
     }
     var overflow = fields
-    overflow.application[ApplicationProfile.cborKeyVersions] = .array([.unsigned(UInt64(Int64.max) + 1)])
+    overflow.blah[ApplicationProfile.cborKeyVersions] = .array([.unsigned(UInt64(Int64.max) + 1)])
     cases.append(overflow)
     var unordered = fields
-    unordered.application[ApplicationProfile.cborKeyVersions] = .array([.unsigned(2), .negative(-1)])
+    unordered.blah[ApplicationProfile.cborKeyVersions] = .array([.unsigned(2), .negative(-1)])
     cases.append(unordered)
     var algorithm = fields
-    algorithm.application[ApplicationProfile.cborKeyOAuth] = .record([
+    algorithm.blah[ApplicationProfile.cborKeyOAuth] = .record([
       0: .bool(true), 1: .array([.text("https://a.example/")]),
       2: .array([.record([0: .text("k"), 1: .unsigned(5), 2: .bytes([UInt8](repeating: 0, count: 32))])]),
     ])
@@ -119,7 +119,7 @@ import Testing
     }
     // Unknown keys are accepted.
     var extended = fields
-    extended.application[ApplicationProfile.cborKeyVersions + 1] = .text("future")
+    extended.blah[ApplicationProfile.cborKeyVersions + 1] = .text("future")
     let identity = try await BasicIdentity<ProfileRecord>(extended, using: backend)
     #expect(try ApplicationProfile(record: identity.profile).content == Self.full)
   }

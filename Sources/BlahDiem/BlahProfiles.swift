@@ -1,9 +1,16 @@
 /// A Diem profile of a Blah identity: named by the domains that serve it, with a profile
-/// kind and that kind's fields signed as application fields.
+/// kind and that kind's fields signed in Blah's application field.
 public protocol BlahProfile: DomainNamedProfile {
   /// The account hosting that proofs and client namespaces rely on. A DC is a special
   /// user permanently hosted by itself; its hosting expires with the profile.
   var home: Home? { get }
+}
+
+extension BlahProfile {
+  /// The application whose field holds the profile kind and that kind's fields.
+  public static var application: ApplicationID { .blah }
+  /// Blah's field: publishing Blah content replaces it and keeps other applications'.
+  public static var applications: Set<ApplicationID> { [.blah] }
 }
 
 /// The DC hosting an account, and the account it allocated there.
@@ -54,8 +61,9 @@ public struct HostedContent: Hashable, Sendable {
 
 /// A person's profile.
 public struct UserProfile: BlahProfile {
-  /// CBOR field keys in the signed profile content.
-  public static let cborKeyKind: UInt64 = ProfileFields.firstApplicationKey
+  /// CBOR field keys in the map at ``BlahProfile/application`` in the signed profile
+  /// content.
+  public static let cborKeyKind: UInt64 = 0
   public static let cborKeyHome: UInt64 = cborKeyKind + 1
 
   public let record: ProfileRecord
@@ -70,6 +78,12 @@ public struct UserProfile: BlahProfile {
     try HostedRecord.encode(content, kind: .user)
   }
 
+  public static func content(_ content: HostedContent, replacingDomains domains: [DomainName])
+    throws(BlahError) -> HostedContent
+  {
+    try HostedRecord.replacing(content, domains: domains, kind: .user)
+  }
+
   public var home: Home? { content.home }
   /// The first domain.
   public var username: DomainName? { content.username }
@@ -77,7 +91,8 @@ public struct UserProfile: BlahProfile {
 
 /// A bot's profile.
 public struct BotProfile: BlahProfile {
-  /// CBOR field keys in the signed profile content.
+  /// CBOR field keys in the map at ``BlahProfile/application`` in the signed profile
+  /// content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
 
@@ -93,6 +108,12 @@ public struct BotProfile: BlahProfile {
     try HostedRecord.encode(content, kind: .bot)
   }
 
+  public static func content(_ content: HostedContent, replacingDomains domains: [DomainName])
+    throws(BlahError) -> HostedContent
+  {
+    try HostedRecord.replacing(content, domains: domains, kind: .bot)
+  }
+
   public var home: Home? { content.home }
   /// The first domain.
   public var username: DomainName? { content.username }
@@ -100,7 +121,8 @@ public struct BotProfile: BlahProfile {
 
 /// A channel's or supergroup's profile.
 public struct ChannelProfile: BlahProfile {
-  /// CBOR field keys in the signed profile content.
+  /// CBOR field keys in the map at ``BlahProfile/application`` in the signed profile
+  /// content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
 
@@ -116,6 +138,12 @@ public struct ChannelProfile: BlahProfile {
     try HostedRecord.encode(content, kind: .channel)
   }
 
+  public static func content(_ content: HostedContent, replacingDomains domains: [DomainName])
+    throws(BlahError) -> HostedContent
+  {
+    try HostedRecord.replacing(content, domains: domains, kind: .channel)
+  }
+
   public var home: Home? { content.home }
   /// The first domain.
   public var username: DomainName? { content.username }
@@ -123,7 +151,8 @@ public struct ChannelProfile: BlahProfile {
 
 /// A sticker or custom-emoji set's profile.
 public struct StickerSetProfile: BlahProfile {
-  /// CBOR field keys in the signed profile content.
+  /// CBOR field keys in the map at ``BlahProfile/application`` in the signed profile
+  /// content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
 
@@ -152,6 +181,17 @@ public struct StickerSetProfile: BlahProfile {
   public static func fields(for content: Content) throws(BlahError) -> ProfileFields {
     try HostedRecord.encode(
       HostedContent(home: content.home, domains: [content.shortName]), kind: .stickerSet)
+  }
+
+  /// Replaces the short name: `domains` must be exactly one name.
+  public static func content(_ content: Content, replacingDomains domains: [DomainName])
+    throws(BlahError) -> Content
+  {
+    guard domains.count == 1 else { throw .invalidName }
+    var next = content
+    next.shortName = domains[0]
+    _ = try fields(for: next)
+    return next
   }
 
   public var home: Home? { content.home }
@@ -192,16 +232,6 @@ public enum AnyBlahProfile: BlahProfile {
   case dc(DCProfile)
   case application(ApplicationProfile)
 
-  /// Decodes a public Blah profile and verifies its certificates and signature at
-  /// the start of its signed validity window, including profiles that have lapsed.
-  /// Check `validity.contains(now)` separately before treating it as current.
-  /// Callers own identity pinning and persistent generation/revision floors.
-  @inline(__always)
-  public init(verifying encoding: [UInt8], using backend: some CryptoBackend) async throws {
-    try self.init(encoding: encoding)
-    try await verify(using: backend, at: validity.notBefore)
-  }
-
   public init(record: ProfileRecord) throws(BlahError) {
     switch try HostedRecord.kind(of: record.fields) {
     case .user: self = .user(try UserProfile(record: record))
@@ -221,6 +251,22 @@ public enum AnyBlahProfile: BlahProfile {
     case .stickerSet(let c): try StickerSetProfile.fields(for: c)
     case .dc(let c): try DCProfile.fields(for: c)
     case .application(let c): try ApplicationProfile.fields(for: c)
+    }
+  }
+
+  /// `content` listing `domains`, under its kind's own naming rules.
+  public static func content(_ content: Content, replacingDomains domains: [DomainName])
+    throws(BlahError) -> Content
+  {
+    switch content {
+    case .user(let c): .user(try UserProfile.content(c, replacingDomains: domains))
+    case .bot(let c): .bot(try BotProfile.content(c, replacingDomains: domains))
+    case .channel(let c): .channel(try ChannelProfile.content(c, replacingDomains: domains))
+    case .stickerSet(let c):
+      .stickerSet(try StickerSetProfile.content(c, replacingDomains: domains))
+    case .dc(let c): .dc(try DCProfile.content(c, replacingDomains: domains))
+    case .application(let c):
+      .application(try ApplicationProfile.content(c, replacingDomains: domains))
     }
   }
 
@@ -258,13 +304,36 @@ public enum AnyBlahProfile: BlahProfile {
   }
 }
 
-/// Blah's application fields: a kind and, for hosted kinds, a nullable home record.
+/// Blah's application field: a map of a kind and, for hosted kinds, a nullable home record.
 enum HostedRecord {
+  /// The map at ``ApplicationID/blah``. Keys it does not know are ignored.
+  static func blah(_ fields: ProfileFields) throws(BlahError) -> CBOR.Record {
+    guard let value = fields.applications[.blah] else { throw .invalidProfile }
+    return try value.record(.invalidProfile, requiredKeys: UserProfile.cborKeyKind..<(UserProfile.cborKeyKind + 1))
+  }
+
+  /// Profile fields with the Blah map holding `blah`.
+  static func fields(domains: [DomainName], blah: [UInt64: CBOR]) -> ProfileFields {
+    ProfileFields(domains: domains, applications: [.blah: .record(blah)])
+  }
+
   static func kind(of fields: ProfileFields) throws(BlahError) -> ProfileKind {
-    guard let value = fields.application[UserProfile.cborKeyKind],
-      let kind = ProfileKind(rawValue: try value.unsigned(.invalidProfile))
+    try kind(of: blah(fields))
+  }
+
+  static func kind(of blah: CBOR.Record) throws(BlahError) -> ProfileKind {
+    guard let kind = ProfileKind(rawValue: try blah[UserProfile.cborKeyKind]!.unsigned(.invalidProfile))
     else { throw .invalidProfile }
     return kind
+  }
+
+  static func replacing(_ content: HostedContent, domains: [DomainName], kind: ProfileKind)
+    throws(BlahError) -> HostedContent
+  {
+    var next = content
+    next.domains = domains
+    try validate(next, kind: kind)
+    return next
   }
 
   static func encode(_ content: HostedContent, kind: ProfileKind) throws(BlahError) -> ProfileFields {
@@ -277,15 +346,15 @@ enum HostedRecord {
           Home.cborKeyAccount: $0.account.map { .unsigned(UInt64($0)) } ?? .null,
         ])
       } ?? .null
-    return ProfileFields(domains: content.domains, application: [
+    return fields(domains: content.domains, blah: [
       UserProfile.cborKeyKind: .unsigned(kind.rawValue), UserProfile.cborKeyHome: home,
     ])
   }
 
   static func decode(_ fields: ProfileFields, kind: ProfileKind) throws(BlahError) -> HostedContent {
     let e = BlahError.invalidProfile
-    guard try self.kind(of: fields) == kind, let value = fields.application[UserProfile.cborKeyHome]
-    else { throw e }
+    let map = try blah(fields)
+    guard try self.kind(of: map) == kind, let value = map[UserProfile.cborKeyHome] else { throw e }
     var home: Home?
     if value != .null {
       let h = try value.record(e, requiredKeys: Home.cborKeyDC..<(Home.cborKeyAccount + 1))

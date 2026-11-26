@@ -5,8 +5,8 @@ Blah profiles and proofs on Diem identities, shared by Blah clients and DCs.
 ## Overview
 
 Every Blah account, bot, channel, sticker set, DC and application is a Diem identity. Each Blah
-profile type is a Diem `DomainNamedProfile`, and its devices sign the DC's challenges as
-Blah proofs.
+profile type is a Diem `DomainNamedProfile` whose fields sit under Blah's application ID,
+`com.blahim`, and its devices sign the DC's challenges as Blah proofs.
 
 ```swift
 var user = HostedContent(home: Home(dc: dc.id, epoch: 1, expiresAt: expiry), domains: domains)
@@ -35,6 +35,7 @@ let proof = try await identity.prove(loginChallenge)
 - ``ApplicationProfile``
 - ``ApplicationWirePair``
 - ``AnyBlahProfile``
+- ``AnyBlahProfile/content(_:replacingDomains:)``
 - ``AnyBlahProfile/Content/replacingDomains(_:)``
 - ``HostedContent``
 - ``Home``
@@ -54,6 +55,10 @@ let proof = try await identity.prove(loginChallenge)
 ### Client storage
 
 - ``ClientNamespace``
+
+### Application fields
+
+- ``ApplicationID/blah``
 
 ### Device linking
 

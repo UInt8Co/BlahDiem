@@ -35,3 +35,11 @@ enum Fixture {
     Home(dc: dcID, epoch: 1, expiresAt: TestBackend.start + 3600, account: account)
   }
 }
+
+extension ProfileFields {
+  /// The Blah map, for tests that sign altered fields directly.
+  var blah: CBOR.Record {
+    get { try! applications[.blah]!.recordValue(requiredKeys: 0..<0) }
+    set { applications[.blah] = newValue.value }
+  }
+}

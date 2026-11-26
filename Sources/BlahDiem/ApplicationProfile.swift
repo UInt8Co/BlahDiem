@@ -4,7 +4,8 @@
 /// The identity, not a DC, names the application. Its MTProto `api_id` and `api_hash`
 /// derive from the identity ID; see ``ApplicationWirePair``.
 public struct ApplicationProfile: BlahProfile {
-  /// CBOR field keys in the signed profile content.
+  /// CBOR field keys in the map at ``BlahProfile/application`` in the signed profile
+  /// content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyName: UInt64 = UserProfile.cborKeyHome + 1
   public static let cborKeyDownloadURL: UInt64 = cborKeyName + 1
@@ -194,9 +195,9 @@ public struct ApplicationProfile: BlahProfile {
 
     init(fields: ProfileFields) throws(BlahError) {
       let e = BlahError.invalidProfile
-      let a = fields.application
+      let a = try HostedRecord.blah(fields)
       typealias P = ApplicationProfile
-      guard try HostedRecord.kind(of: fields) == .application,
+      guard try HostedRecord.kind(of: a) == .application,
         (P.cborKeyName...P.cborKeyVersions).allSatisfy({ a[$0] != nil })
       else { throw e }
       func optional<T>(_ value: CBOR, _ read: (CBOR) throws(BlahError) -> T) throws(BlahError) -> T? {
@@ -268,7 +269,7 @@ public struct ApplicationProfile: BlahProfile {
         try validate()
         typealias P = ApplicationProfile
         func optional<T>(_ value: T?, _ encode: (T) -> CBOR) -> CBOR { value.map(encode) ?? .null }
-        return ProfileFields(domains: domains, application: [
+        return HostedRecord.fields(domains: domains, blah: [
           P.cborKeyKind: .unsigned(ProfileKind.application.rawValue),
           P.cborKeyName: .text(name),
           P.cborKeyDownloadURL: optional(downloadURL, CBOR.text),
@@ -358,6 +359,16 @@ public struct ApplicationProfile: BlahProfile {
 
   public static func fields(for content: Content) throws(BlahError) -> ProfileFields {
     try content.fields
+  }
+
+  /// Replaces the domains, of which an application keeps at least one.
+  public static func content(_ content: Content, replacingDomains domains: [DomainName])
+    throws(BlahError) -> Content
+  {
+    var next = content
+    next.domains = domains
+    _ = try next.fields
+    return next
   }
 
   /// An application is not hosted by a DC.

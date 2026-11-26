@@ -11,7 +11,7 @@ public struct DCAddress: Hashable, Sendable {
 
 extension CBOR {
   /// The DC address at `domainKey` and `idKey` of a decoded record.
-  static func dcAddress(_ fields: [UInt64: CBOR], domain domainKey: UInt64, id idKey: UInt64,
+  static func dcAddress(_ fields: CBOR.Record, domain domainKey: UInt64, id idKey: UInt64,
     error: BlahError) throws(BlahError) -> DCAddress
   {
     DCAddress(domain: try fields[domainKey]!.domain(error), id: try fields[idKey]!.digest(error))

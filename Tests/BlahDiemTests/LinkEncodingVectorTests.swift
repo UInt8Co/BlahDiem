@@ -1,6 +1,8 @@
 import BlahDiem
 import Testing
 
+/// Blah's QR device link uses Diem's records unchanged; these bytes were assembled
+/// independently of Diem's encoder.
 @Suite struct LinkEncodingVectorTests {
   private func hex(_ text: String) -> [UInt8] {
     let characters = Array(text)
@@ -16,60 +18,14 @@ import Testing
       recipient: EncryptionPublicKey(algorithm: .p256, rawRepresentation: hex(
         "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")),
       label: "Desktop", verifies: [.ed25519, .p256])
-    let encoded = hex("a600110101025834a500684469656d2f6b6579010302020301045820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f035855a500684469656d2f6b6579010302030304045841046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f504674465736b746f7005820102")
+    let encoded = hex("a60078184469656d2f6465766963652d6c696e6b2d726571756573740101025834a500684469656d2f6b6579010302020301045820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f035855a500684469656d2f6b6579010302030304045841046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f504674465736b746f7005820102")
     #expect(request.encoding == encoded)
     #expect(try DeviceLinkRequest(encoding: encoded).encoding == encoded)
-    #expect(request.digest.bytes == hex("cf94945a4a5fdc94b7740d5e021ece9ffaf96df295fe8b9b5742f791d84d1cb1"))
+    #expect(request.digest.bytes == hex("220d928bedac538a97e26b9b52df912ce3068bad5b1d9d3cd39d8ddbdd8bda69"))
     let code = try DeviceLinkCode(requestDigest: request.digest, secret: Array(0..<16))
-    #expect(code.encoding == hex("a400120101025820cf94945a4a5fdc94b7740d5e021ece9ffaf96df295fe8b9b5742f791d84d1cb10350000102030405060708090a0b0c0d0e0f"))
-    #expect(code.parameter == "pAASAQECWCDPlJRaSl_clLd0DV4CHs6f-vlt8pX-i5tXQveR2E0csQNQAAECAwQFBgcICQoLDA0ODw")
+    #expect(code.encoding == hex("a400754469656d2f6465766963652d6c696e6b2d636f64650101025820220d928bedac538a97e26b9b52df912ce3068bad5b1d9d3cd39d8ddbdd8bda690350000102030405060708090a0b0c0d0e0f"))
+    #expect(code.parameter == "pAB1RGllbS9kZXZpY2UtbGluay1jb2RlAQECWCAiDZKL7axTipfia5tS35Es4waLrVsdnTzTnY3b3YvaaQNQAAECAwQFBgcICQoLDA0ODw")
     #expect(try DeviceLinkCode(parameter: code.parameter).matches(encoded))
-    #expect(DeviceLinkContext(code: code).encoding == hex("a400140101025820cf94945a4a5fdc94b7740d5e021ece9ffaf96df295fe8b9b5742f791d84d1cb10350000102030405060708090a0b0c0d0e0f"))
-  }
-
-  @Test func digestIncludesExtensionsAndBase64IsCanonical() async throws {
-    let backend = TestBackend()
-    let request = try await DeviceLinkRequest(device: DevicePrivateKey.generate(.ed25519, using: backend).publicKey,
-      recipient: backend.makeEncryptionKey(.p256).publicKey, label: "桌面", verifies: [.ed25519])
-    var fields = try CBOR(decoding: request.encoding).recordValue(requiredKeys: 0..<6)
-    fields[100] = .text("future")
-    let extended = CBOR.record(fields).encoded
-    let decoded = try DeviceLinkRequest(encoding: extended)
-    #expect(decoded.encoding == extended)
-    let code = try DeviceLinkCode(request: decoded, using: backend)
-    #expect(code.matches(extended))
-    #expect(!code.matches(request.encoding))
-    #expect(throws: (any Error).self) { try DeviceLinkCode(parameter: code.parameter + "=") }
-    #expect(throws: (any Error).self) { try DeviceLinkCode(parameter: "A") }
-    // A 58-byte code has four unused low bits in its last base64url character.
-    let canonical = try DeviceLinkCode(requestDigest: request.digest, secret: Array(repeating: 0, count: 16))
-    #expect(throws: (any Error).self) {
-      try DeviceLinkCode(parameter: String(canonical.parameter.dropLast()) + "B")
-    }
-  }
-
-  @Test func openingRequiresAnExpectedDCAndActiveHome() async throws {
-    let backend = TestBackend()
-    let recipient = try await backend.makeEncryptionKey(.p256)
-    let device = try await DevicePrivateKey.generate(.ed25519, using: backend)
-    let request = try DeviceLinkRequest(device: device.publicKey, recipient: recipient.publicKey,
-      label: "Desktop", verifies: [.ed25519])
-    let code = try DeviceLinkCode(request: request, using: backend)
-    let domain = try DomainName("link.example")
-    var identity = try await BasicIdentity<UserProfile>(
-      HostedContent(home: Fixture.home(account: 42), domains: [domain]),
-      identityKey: .generate(.ed25519, using: backend), deviceKey: .generate(.ed25519, using: backend), using: backend)
-    try await identity.add(device.publicKey)
-    let grant = try DeviceLinkGrant(profile: identity.profile.encoding, domain: domain)
-    let response = try await DeviceLinkResponse.seal(grant, for: request, code: code, using: backend)
-    await #expect(throws: BlahError.wrongHome) {
-      try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-        code: code, expectedDC: nil, using: backend)
-    }
-    // The profile remains valid beyond this independently expiring home delegation.
-    await #expect(throws: BlahError.wrongHome) {
-      try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-        code: code, expectedDC: Fixture.dcID, at: backend.now + 3600, using: backend)
-    }
+    #expect(DeviceLinkContext(code: code).encoding == hex("a40078184469656d2f6465766963652d6c696e6b2d636f6e746578740101025820220d928bedac538a97e26b9b52df912ce3068bad5b1d9d3cd39d8ddbdd8bda690350000102030405060708090a0b0c0d0e0f"))
   }
 }

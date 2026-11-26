@@ -1,3 +1,9 @@
+extension ApplicationID {
+  /// Blah's application ID, `com.blahim`: the key of Blah's field in Diem profiles and
+  /// proofs, and of a device-link grant's Blah metadata.
+  public static let blah = try! ApplicationID("com.blahim")
+}
+
 /// Tags of Blah records, stored at integer key 0; key 1 holds the version.
 enum BlahTag: UInt64 {
   static let cborKeyTag: UInt64 = 0
@@ -10,14 +16,10 @@ enum BlahTag: UInt64 {
   case accountLink = 8
   case dcAdmin = 9
   case clientNamespace = 10
-  // Tags 14–16 are retired.
-  case deviceLinkRequest = 17
-  case deviceLinkCode = 18
-  case deviceLinkGrant = 19
-  case deviceLinkContext = 20
+  // Tags 14–20 are retired; device-link records are Diem's.
 }
 
-/// Profile kind codes, at ``UserProfile/cborKeyKind`` in every Blah profile.
+/// Profile kind codes, at ``UserProfile/cborKeyKind`` in every Blah profile's field.
 enum ProfileKind: UInt64 {
   case user = 1
   case channel = 2
@@ -29,17 +31,24 @@ enum ProfileKind: UInt64 {
 
 /// Decoding helpers that map Diem encoding errors to one Blah error.
 extension CBOR {
+  /// The version 1 Blah record with `tag` in canonical `bytes`.
   static func record(_ bytes: [UInt8], tag: BlahTag, requiredKeys: Range<UInt64>, error: BlahError)
-    throws(BlahError) -> [UInt64: CBOR]
+    throws(BlahError) -> CBOR.Record
   {
-    guard let fields = try? CBOR(decoding: bytes).recordValue(requiredKeys: requiredKeys),
-      fields[BlahTag.cborKeyTag] == .unsigned(tag.rawValue),
-      fields[BlahTag.cborKeyVersion] == .unsigned(1)
-    else { throw error }
-    return fields
+    guard let value = try? CBOR(decoding: bytes) else { throw error }
+    return try value.record(tag: tag, requiredKeys: requiredKeys, error: error)
   }
 
-  func record(_ error: BlahError, requiredKeys: Range<UInt64>) throws(BlahError) -> [UInt64: CBOR] {
+  /// This value as the version 1 Blah record with `tag`.
+  func record(tag: BlahTag, requiredKeys: Range<UInt64>, error: BlahError)
+    throws(BlahError) -> CBOR.Record
+  {
+    try field(error) { value throws(DiemError) in
+      try value.recordValue(tag: .unsigned(tag.rawValue), version: 1, requiredKeys: requiredKeys)
+    }
+  }
+
+  func record(_ error: BlahError, requiredKeys: Range<UInt64>) throws(BlahError) -> CBOR.Record {
     try field(error) { value throws(DiemError) in try value.recordValue(requiredKeys: requiredKeys) }
   }
 

@@ -26,7 +26,7 @@ public struct LoginChallenge: BlahStatement {
   public let deviceID: Digest
   /// The `Profile.digest` of the profile the device signs in with.
   public let profileDigest: Digest
-  private var extensionFields: [UInt64: CBOR] = [:]
+  private var extensionFields = CBOR.Record()
 
   public let dc: DCAddress
   public let authKeyID: Int64
@@ -50,10 +50,11 @@ public struct LoginChallenge: BlahStatement {
     self.sessionID = sessionID
   }
 
-  public init(encoding: [UInt8]) throws(BlahError) {
+  /// Decodes a statement from its proof value.
+  public init(value: CBOR) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(
-      encoding, tag: .login, requiredKeys: Self.cborKeyTag..<(Self.cborKeySessionID + 1), error: e)
+    let a = try value.record(
+      tag: .login, requiredKeys: Self.cborKeyTag..<(Self.cborKeySessionID + 1), error: e)
     guard let operation = Operation(rawValue: try a[Self.cborKeyOperation]!.unsigned(e)) else {
       throw e
     }
@@ -66,10 +67,11 @@ public struct LoginChallenge: BlahStatement {
       dc: CBOR.dcAddress(a, domain: Self.cborKeyDCDomain, id: Self.cborKeyDCID, error: e),
       authKeyID: Int64(bitPattern: a[Self.cborKeyAuthKeyID]!.unsigned(e)),
       sessionID: a[Self.cborKeySessionID]!.unsigned(e))
-    extensionFields = a.filter { $0.key > Self.cborKeySessionID }
+    extensionFields = a.extensions(above: Self.cborKeySessionID)
   }
 
-  public var encoding: [UInt8] {
+  /// The proof value: the canonical record.
+  public var value: CBOR {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.login.rawValue), Self.cborKeyVersion: .unsigned(1),
@@ -81,8 +83,8 @@ public struct LoginChallenge: BlahStatement {
         Self.cborKeyDCDomain: .text(dc.domain.name), Self.cborKeyDCID: .bytes(dc.id.bytes),
         Self.cborKeyAuthKeyID: .unsigned(UInt64(bitPattern: authKeyID)),
         Self.cborKeySessionID: .unsigned(sessionID),
-      ], extensions: extensionFields
-    ).encoded
+      ], retaining: extensionFields
+    )
   }
 
   /// Requires a live challenge for this identity, device and profile, from its home DC.

@@ -3,7 +3,8 @@ public struct DCProfile: BlahProfile {
   /// A DC's user account is permanently hosted by that same identity.
   public static let accountID: Int64 = 777000
   public static let accountEpoch: UInt64 = 1
-  /// CBOR field keys in the signed profile content.
+  /// CBOR field keys in the map at ``BlahProfile/application`` in the signed profile
+  /// content.
   public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
   public static let cborKeyEndpoints: UInt64 = UserProfile.cborKeyHome + 1
   public static let cborKeyBIDCOMEndpoints: UInt64 = cborKeyEndpoints + 1
@@ -69,8 +70,8 @@ public struct DCProfile: BlahProfile {
 
     init(fields: ProfileFields) throws(BlahError) {
       let e = BlahError.invalidProfile
-      let a = fields.application
-      guard try HostedRecord.kind(of: fields) == .dc,
+      let a = try HostedRecord.blah(fields)
+      guard try HostedRecord.kind(of: a) == .dc,
         (DCProfile.cborKeyEndpoints...DCProfile.cborKeyNamespaceGeneration).allSatisfy({ a[$0] != nil })
       else { throw e }
       func endpoints(_ value: CBOR) throws(BlahError) -> [Endpoint] {
@@ -115,7 +116,7 @@ public struct DCProfile: BlahProfile {
               ])
             })
         }
-        return ProfileFields(domains: domains, application: [
+        return HostedRecord.fields(domains: domains, blah: [
           DCProfile.cborKeyKind: .unsigned(ProfileKind.dc.rawValue),
           DCProfile.cborKeyEndpoints: encode(endpoints),
           DCProfile.cborKeyBIDCOMEndpoints: encode(bidcomEndpoints),
@@ -148,6 +149,16 @@ public struct DCProfile: BlahProfile {
 
   public static func fields(for content: Content) throws(BlahError) -> ProfileFields {
     try content.fields
+  }
+
+  /// Replaces the discovery domains, of which a DC keeps at least one.
+  public static func content(_ content: Content, replacingDomains domains: [DomainName])
+    throws(BlahError) -> Content
+  {
+    var next = content
+    next.domains = domains
+    _ = try next.fields
+    return next
   }
 
   /// The DC's own user account, hosted by this identity until the profile expires.

@@ -18,7 +18,7 @@ public struct OAuthConsentChallenge: BlahStatement {
   public static let cborKeyState: UInt64 = 12
   public static let cborKeyOIDCNonce: UInt64 = 13
 
-  private var extensionFields: [UInt64: CBOR] = [:]
+  private var extensionFields = CBOR.Record()
 
   public let dc: DCAddress
   public let nonce: [UInt8]
@@ -64,10 +64,11 @@ public struct OAuthConsentChallenge: BlahStatement {
     self.oidcNonce = oidcNonce
   }
 
-  public init(encoding: [UInt8]) throws(BlahError) {
+  /// Decodes a statement from its proof value.
+  public init(value: CBOR) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(
-      encoding, tag: .oauthConsent, requiredKeys: Self.cborKeyTag..<(Self.cborKeyOIDCNonce + 1),
+    let a = try value.record(
+      tag: .oauthConsent, requiredKeys: Self.cborKeyTag..<(Self.cborKeyOIDCNonce + 1),
       error: e)
     var scopes: [String] = []
     for scope in try a[Self.cborKeyScopes]!.array(e) { scopes.append(try scope.text(e)) }
@@ -80,10 +81,11 @@ public struct OAuthConsentChallenge: BlahStatement {
       redirectURI: a[Self.cborKeyRedirectURI]!.text(e), scopes: scopes,
       codeChallenge: a[Self.cborKeyCodeChallenge]!.text(e), state: a[Self.cborKeyState]!.text(e),
       oidcNonce: a[Self.cborKeyOIDCNonce]!.text(e))
-    extensionFields = a.filter { $0.key > Self.cborKeyOIDCNonce }
+    extensionFields = a.extensions(above: Self.cborKeyOIDCNonce)
   }
 
-  public var encoding: [UInt8] {
+  /// The proof value: the canonical record.
+  public var value: CBOR {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.oauthConsent.rawValue),
@@ -95,8 +97,8 @@ public struct OAuthConsentChallenge: BlahStatement {
         Self.cborKeyScopes: .array(scopes.map(CBOR.text)),
         Self.cborKeyCodeChallenge: .text(codeChallenge), Self.cborKeyState: .text(state),
         Self.cborKeyOIDCNonce: .text(oidcNonce),
-      ], extensions: extensionFields
-    ).encoded
+      ], retaining: extensionFields
+    )
   }
 
   /// Requires a live challenge from the identity's home DC.

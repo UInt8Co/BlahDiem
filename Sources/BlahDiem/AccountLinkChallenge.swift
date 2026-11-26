@@ -26,7 +26,7 @@ public struct AccountLinkChallenge: BlahStatement {
     case unlink = 4
   }
 
-  private var extensionFields: [UInt64: CBOR] = [:]
+  private var extensionFields = CBOR.Record()
 
   public let dc: DCAddress
   public let nonce: [UInt8]
@@ -74,10 +74,11 @@ public struct AccountLinkChallenge: BlahStatement {
     self.label = label
   }
 
-  public init(encoding: [UInt8]) throws(BlahError) {
+  /// Decodes a statement from its proof value.
+  public init(value: CBOR) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(
-      encoding, tag: .accountLink, requiredKeys: Self.cborKeyTag..<(Self.cborKeyLabel + 1), error: e
+    let a = try value.record(
+      tag: .accountLink, requiredKeys: Self.cborKeyTag..<(Self.cborKeyLabel + 1), error: e
     )
     guard let operation = Operation(rawValue: try a[Self.cborKeyOperation]!.unsigned(e)),
       a[Self.cborKeyProvider]! == .unsigned(1)
@@ -99,10 +100,11 @@ public struct AccountLinkChallenge: BlahStatement {
       externalID: text(a[Self.cborKeyExternalID]!),
       previousExternalID: text(a[Self.cborKeyPreviousExternalID]!),
       label: text(a[Self.cborKeyLabel]!))
-    extensionFields = a.filter { $0.key > Self.cborKeyLabel }
+    extensionFields = a.extensions(above: Self.cborKeyLabel)
   }
 
-  public var encoding: [UInt8] {
+  /// The proof value: the canonical record.
+  public var value: CBOR {
     CBOR.record(
       [
         Self.cborKeyTag: .unsigned(BlahTag.accountLink.rawValue), Self.cborKeyVersion: .unsigned(1),
@@ -114,8 +116,8 @@ public struct AccountLinkChallenge: BlahStatement {
         Self.cborKeyExternalID: .text(externalID ?? ""),
         Self.cborKeyPreviousExternalID: .text(previousExternalID ?? ""),
         Self.cborKeyLabel: .text(label ?? ""),
-      ], extensions: extensionFields
-    ).encoded
+      ], retaining: extensionFields
+    )
   }
 
   /// Requires a live challenge from the identity's home DC, naming this identity if any.

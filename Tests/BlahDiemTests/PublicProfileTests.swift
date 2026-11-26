@@ -60,7 +60,7 @@ import Testing
         envelope[4] = .bytes(bytes)
       }
       await #expect(throws: DiemError.invalidSignature) {
-        try await AnyBlahProfile(verifying: CBOR.record(envelope).encoded, using: backend)
+        try await AnyBlahProfile(verifying: envelope.value.encoded, using: backend)
       }
     }
   }
@@ -69,7 +69,7 @@ import Testing
     let home = Fixture.home(account: 997_852_516_352)
     var fields = try UserProfile.fields(for: HostedContent(home: home))
     // The same account number is valid for a user but outside the channel range.
-    fields.application[UserProfile.cborKeyKind] = .unsigned(2)
+    fields.blah[UserProfile.cborKeyKind] = .unsigned(2)
     let identity = try await BasicIdentity<ProfileRecord>(fields, using: backend)
     try await identity.profile.verify(using: backend)
     await #expect(throws: BlahError.invalidProfile) {
@@ -92,11 +92,11 @@ import Testing
     for (key, value) in mutations {
       var content = original
       content[key] = value
-      let changed = try await SignedMessage(signing: CBOR.record(content).encoded, with: device)
+      let changed = try await SignedMessage(signing: content.value.encoded, with: device)
       var envelope = try CBOR(decoding: identity.profile.encoding).recordValue(requiredKeys: 0..<5)
       envelope[4] = .bytes(changed.encoding)
       await #expect(throws: (any Error).self) {
-        try await AnyBlahProfile(verifying: CBOR.record(envelope).encoded, using: backend)
+        try await AnyBlahProfile(verifying: envelope.value.encoded, using: backend)
       }
     }
   }

@@ -59,7 +59,7 @@ import Testing
       let host = ProfileHostingClient(domain: try DomainName("id.example"), http: transport)
       var identity = try await BasicIdentity<AnyBlahProfile>(content, using: backend)
       let claim = try await identity.claiming(labels: ["alice"], at: host,
-        solver: PortableProofOfWorkSolver(), transform: { try $0.replacingDomains($1) })
+        solver: PortableProofOfWorkSolver())
       #expect(identity.profile.domains == [original])
       #expect(claim.profile.domains.map(\.name) == ["original.example", "alice.id.example"])
       #expect(claim.profile.home == home)
@@ -69,8 +69,7 @@ import Testing
       #expect(try await host.plan(labels: ["alice"], identity: identity.id).names[0].status == .held)
       identity = try await BasicIdentity(profile: claim.profile, deviceKey: identity.deviceKey,
         identityKey: identity.identityKey, using: backend)
-      let release = try await identity.releasing(labels: ["alice"], at: host,
-        transform: { try $0.replacingDomains($1) })
+      let release = try await identity.releasing(labels: ["alice"], at: host)
       #expect(release.profile.content == content)
       #expect(release.via == .name("alice"))
       try await host.publish(release, solver: PortableProofOfWorkSolver())
@@ -100,7 +99,7 @@ import Testing
       let host = ProfileHostingClient(domain: try DomainName("id.example"), http: HostingTestHost())
       let identity = try await BasicIdentity<AnyBlahProfile>(value, using: backend)
       await #expect(throws: BlahError.invalidName) {
-        try await identity.releasing(labels: ["alice"], at: host, transform: { try $0.replacingDomains($1) })
+        try await identity.releasing(labels: ["alice"], at: host)
       }
       if case .stickerSet = value {
         await #expect(throws: BlahError.invalidName) {

@@ -2,450 +2,118 @@ import BlahDiem
 import Foundation
 import Testing
 
-/// Contract tests use public records and independently assembled hostile plaintexts.
+/// Blah's acceptance rules and metadata on Diem's device linking. Diem's own tests cover
+/// the records, their bounds and the HPKE binding.
 @Suite struct DeviceLinkTests {
   let backend = TestBackend()
   let domain = try! DomainName("link.example")
   let secret = [UInt8](0..<16)
   let seed = try! IdentitySeed(entropy: Array(repeating: 8, count: 32))
 
-  func identity(home: Home? = Fixture.home(account: 42), kind: Bool = true, seed: IdentitySeed? = nil)
+  func identity(home: Home? = Fixture.home(account: 42), user: Bool = true)
     async throws -> BasicIdentity<AnyBlahProfile>
   {
     let content = HostedContent(home: home, domains: [domain])
-    return try await BasicIdentity(kind ? .user(content) : .bot(content),
-      identityKey: (seed ?? self.seed).identityKey(.ed25519, using: backend),
+    return try await BasicIdentity(user ? .user(content) : .bot(content),
+      identityKey: seed.identityKey(.ed25519, using: backend),
       deviceKey: .generate(.ed25519, using: backend), using: backend)
   }
 
-  func request(label: String = "Desktop", verifies: [PublicKey.Algorithm] = [.ed25519])
-    async throws -> (DeviceLinkRequest, EncryptionPrivateKey)
-  {
+  func request() async throws -> (DeviceLinkRequest, EncryptionPrivateKey, DeviceLinkCode) {
     let recipient = try await backend.makeEncryptionKey(.p256)
-    return (try await DeviceLinkRequest(device: DevicePrivateKey.generate(.ed25519, using: backend).publicKey,
-      recipient: recipient.publicKey, label: label, verifies: verifies), recipient)
+    let request = try await DeviceLinkRequest(
+      device: DevicePrivateKey.generate(.ed25519, using: backend).publicKey,
+      recipient: recipient.publicKey, label: "Desktop", verifies: [.ed25519])
+    return (request, recipient, try DeviceLinkCode(requestDigest: request.digest, secret: secret))
   }
 
-  func code(_ request: DeviceLinkRequest) throws -> DeviceLinkCode {
-    try DeviceLinkCode(requestDigest: request.digest, secret: secret)
-  }
-
-  func fields(_ bytes: [UInt8]) throws -> [UInt64: CBOR] {
-    try CBOR(decoding: bytes).recordValue(requiredKeys: 0..<0)
-  }
-
-  func replacing(_ bytes: [UInt8], _ key: UInt64, _ value: CBOR?) throws -> [UInt8] {
-    var record = try fields(bytes)
-    record[key] = value
-    return CBOR.record(record).encoded
-  }
-
-  func context(_ code: DeviceLinkCode) -> [UInt8] {
-    CBOR.record([0: .unsigned(20), 1: .unsigned(1),
-      2: .bytes(code.requestDigest.bytes), 3: .bytes(code.secret)]).encoded
-  }
-
-  func plaintext(_ profile: AnyBlahProfile, domain: DomainName? = nil,
-    seed: SealedIdentitySeed? = nil, metadata: [UInt8]? = nil) -> [UInt8]
+  /// A grant record assembled without Blah's checks: `open` must defend itself.
+  func plaintext(_ profile: AnyBlahProfile, seed: SealedIdentitySeed? = nil, blah: CBOR? = nil)
+    -> [UInt8]
   {
-    var fields: [UInt64: CBOR] = [0: .unsigned(19), 1: .unsigned(1),
-      2: .bytes(profile.encoding), 3: .text((domain ?? self.domain).name)]
+    var fields: [UInt64: CBOR] = [0: .text("Diem/device-link-grant"), 1: .unsigned(1),
+      2: .bytes(profile.encoding), 3: .text(domain.name)]
     if let seed { fields[4] = .bytes(seed.encoding) }
-    if let metadata { fields[5] = .bytes(metadata) }
-    return CBOR.record(fields).encoded
+    return CBOR.record(fields, applications: blah.map { [.blah: $0] } ?? [:]).encoded
   }
 
-  // Bypasses the friendly grant/seal constructors: open must defend itself.
-  func rawResponse(_ plaintext: [UInt8], request: DeviceLinkRequest, code: DeviceLinkCode,
-    recipient: EncryptionPublicKey? = nil) async throws -> [UInt8]
+  func rawResponse(_ plaintext: [UInt8], request: DeviceLinkRequest, code: DeviceLinkCode)
+    async throws -> [UInt8]
   {
-    let box = try await backend.seal(plaintext, to: recipient ?? request.recipient, context: context(code))
+    let box = try await backend.seal(plaintext, to: request.recipient,
+      context: DeviceLinkContext(code: code).encoding)
     return CBOR.record([0: .bytes(box.encapsulatedKey), 1: .bytes(box.ciphertext)]).encoded
   }
 
-  @Test func roundTripsAndCanonicalRecords() async throws {
-    let (request, _) = try await request()
-    let code = try code(request)
-    #expect(try DeviceLinkRequest(encoding: request.encoding).encoding == request.encoding)
-    #expect(request.digest == Digest(hashing: request.encoding))
-    #expect(try DeviceLinkCode(encoding: code.encoding).encoding == code.encoding)
-    #expect(try fields(request.encoding) == [0: .unsigned(17), 1: .unsigned(1),
-      2: .bytes(request.device.key.encoding), 3: .bytes(request.recipient.encoding),
-      4: .text("Desktop"), 5: .array([.unsigned(1)])])
-    #expect(try fields(code.encoding) == [0: .unsigned(18), 1: .unsigned(1),
-      2: .bytes(request.digest.bytes), 3: .bytes(secret)])
-    #expect(try DeviceLinkContext(encoding: context(code)).encoding == context(code))
-    for bytes in [request.encoding, code.encoding, context(code)] {
-      #expect(try CBOR(decoding: bytes).encoded == bytes)
-    }
-  }
-
-  @Test func fixedCanonicalEncodingVectors() async throws {
-    func hex(_ text: String) -> [UInt8] {
-      stride(from: 0, to: text.count, by: 2).map { offset in
-        let start = text.index(text.startIndex, offsetBy: offset)
-        return UInt8(text[start..<text.index(start, offsetBy: 2)], radix: 16)!
-      }
-    }
-    // Ed25519 seed 07 x 32, P-256 scalar 1; encoded independently with the JS fixture codec.
-    let expectedRequest = hex("a600110101025834a500684469656d2f6b6579010302020301045820ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c035855a500684469656d2f6b6579010302030304045841046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5046f496e7465726f70206465736b746f70058101")
-    let expectedCode = hex("a40012010102582082c5e613265e617fd26eeff6b2e66860459770a60b6b6614a15aefb66a65a5b50350000102030405060708090a0b0c0d0e0f")
-    let expectedContext = hex("a40014010102582082c5e613265e617fd26eeff6b2e66860459770a60b6b6614a15aefb66a65a5b50350000102030405060708090a0b0c0d0e0f")
-    let device = try DevicePrivateKey(await backend.makePrivateKey(.ed25519, for: .device,
-      restoring: Array(repeating: 7, count: 32)))
-    let recipient = try await backend.makeEncryptionKey(.p256, restoring: Array(repeating: 0, count: 31) + [1])
-    let request = try DeviceLinkRequest(device: device.publicKey, recipient: recipient.publicKey,
-      label: "Interop desktop", verifies: [.ed25519])
-    let code = try code(request)
-    #expect(request.encoding == expectedRequest)
-    #expect(code.encoding == expectedCode)
-    #expect(DeviceLinkContext(code: code).encoding == expectedContext)
-    #expect(try DeviceLinkRequest(encoding: expectedRequest).encoding == expectedRequest)
-    #expect(try DeviceLinkCode(encoding: expectedCode).encoding == expectedCode)
-    #expect(try DeviceLinkContext(encoding: expectedContext).encoding == expectedContext)
-  }
-
-  @Test func labelBoundsCountUTF8Bytes() async throws {
-    for label in ["a", String(repeating: "a", count: 64), String(repeating: "é", count: 32)] {
-      let (request, _) = try await request(label: label)
-      #expect(try DeviceLinkRequest(encoding: request.encoding).label == label)
-    }
-    let (valid, _) = try await request()
-    for label in ["", String(repeating: "a", count: 65), String(repeating: "é", count: 33)] {
-      await #expect(throws: (any Error).self) { try await request(label: label) }
-      #expect(throws: (any Error).self) {
-        try DeviceLinkRequest(encoding: replacing(valid.encoding, 4, .text(label)))
-      }
-    }
-  }
-
-  @Test func algorithmAndRequestBounds() async throws {
-    let (valid, _) = try await request()
-    for algorithms: [PublicKey.Algorithm] in [[], [.ed25519, .ed25519]] {
-      await #expect(throws: (any Error).self) { try await request(verifies: algorithms) }
-      #expect(throws: (any Error).self) {
-        try DeviceLinkRequest(encoding: replacing(valid.encoding, 5,
-          .array(algorithms.map { .unsigned($0.rawValue) })))
-      }
-    }
-    // Unknown fields count towards the encoded limit, even though their meaning is ignored.
-    let overhead = try replacing(valid.encoding, 99, .bytes(Array(repeating: 0, count: 4000))).count - 4000
-    let exact = try replacing(valid.encoding, 99, .bytes(Array(repeating: 0, count: 4096 - overhead)))
-    #expect(exact.count == 4096)
-    _ = try DeviceLinkRequest(encoding: exact)
-    let oversized = try replacing(valid.encoding, 99, .bytes(Array(repeating: 0, count: 4097 - overhead)))
-    #expect(oversized.count == 4097)
-    #expect(throws: (any Error).self) { try DeviceLinkRequest(encoding: oversized) }
-  }
-
-  @Test func unknownKeysAndRequiredHeaders() async throws {
-    let (request, _) = try await request()
-    let code = try code(request)
-    let alice = try await identity()
-    let encodings = [request.encoding, code.encoding, context(code), plaintext(alice.profile)]
-    let decoders: [([UInt8]) throws -> Void] = [
-      { _ = try DeviceLinkRequest(encoding: $0) }, { _ = try DeviceLinkCode(encoding: $0) },
-      { _ = try DeviceLinkContext(encoding: $0) }, { _ = try DeviceLinkGrant(encoding: $0) },
-    ]
-    for (bytes, decode) in zip(encodings, decoders) {
-      try decode(replacing(bytes, 99, .text("future")))
-      for (key, value): (UInt64, CBOR?) in [(0, .unsigned(255)), (1, .unsigned(2)), (0, nil), (1, nil), (2, nil), (3, nil)] {
-        #expect(throws: (any Error).self) { try decode(replacing(bytes, key, value)) }
-      }
-    }
-  }
-
-  @Test func codeTextIsStrictBase64URLAndBindsRequestDigest() async throws {
-    let (request, _) = try await request()
-    let code = try code(request)
-    let expected = Data(code.encoding).base64EncodedString()
-      .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
-      .replacingOccurrences(of: "=", with: "")
-    #expect(code.parameter == expected)
-    #expect(try DeviceLinkCode(parameter: expected).encoding == code.encoding)
-    #expect(code.matches(request.encoding))
-    for index in [0, 16, 31] {
-      var digest = request.digest.bytes
-      digest[index] ^= 1
-      #expect(try !DeviceLinkCode(requestDigest: Digest(bytes: digest), secret: secret).matches(request.encoding))
-    }
-    for malformed in ["", "=", "A", expected + "=", " " + expected, expected + "\n", "+" + expected, "/" + expected, "💥", String(repeating: "a", count: 4097)] {
-      #expect(throws: (any Error).self) { try DeviceLinkCode(parameter: malformed) }
-    }
-    let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
-    let last = alphabet.firstIndex(of: expected.last!)!
-    let nonzeroPadBits = String(expected.dropLast()) + String(alphabet[last ^ 1])
-    #expect(throws: (any Error).self) { try DeviceLinkCode(parameter: nonzeroPadBits) }
-    #expect(throws: (any Error).self) { try DeviceLinkCode(encoding: code.encoding + [0]) }
-    for count in [0, 15, 17] {
-      #expect(throws: (any Error).self) { try DeviceLinkCode(requestDigest: request.digest, secret: Array(repeating: 0, count: count)) }
-      #expect(throws: (any Error).self) { try DeviceLinkCode(encoding: replacing(code.encoding, 3, .bytes(Array(repeating: 0, count: count)))) }
-    }
-    for count in [0, 31, 33] {
-      #expect(throws: (any Error).self) { try DeviceLinkCode(encoding: replacing(code.encoding, 2, .bytes(Array(repeating: 0, count: count)))) }
-    }
-    let (swapped, _) = try await self.request(label: "Attacker")
-    #expect(!code.matches(swapped.encoding))
-    #expect(!code.matches(try replacing(request.encoding, 99, .unsigned(1))))
-  }
-
-  @Test func grantMetadataAndContextDecodingBounds() async throws {
-    let (request, _) = try await request()
-    let code = try code(request)
-    let alice = try await identity()
-    let key = try await seed.sealed(to: request.recipient, identity: alice.profile.identityKey, using: backend)
-    for count in [0, 16384] {
-      let metadata = Array(repeating: UInt8(42), count: count)
-      let decoded = try DeviceLinkGrant(encoding: plaintext(alice.profile, seed: key, metadata: metadata))
-      #expect(decoded.metadata == metadata)
-    }
-    #expect(throws: (any Error).self) {
-      try DeviceLinkGrant(encoding: plaintext(alice.profile, seed: key, metadata: Array(repeating: 42, count: 16385)))
-    }
-    for metadata: [UInt8] in [[], [1]] {
-      #expect(throws: (any Error).self) { try DeviceLinkGrant(encoding: plaintext(alice.profile, metadata: metadata)) }
-      #expect(throws: (any Error).self) { try DeviceLinkGrant(profile: alice.profile, domain: domain, metadata: metadata) }
-    }
-    for count in [0, 15, 17] {
-      #expect(throws: (any Error).self) {
-        try DeviceLinkContext(encoding: replacing(context(code), 3, .bytes(Array(repeating: 0, count: count))))
-      }
-    }
-    for count in [0, 31, 33] {
-      #expect(throws: (any Error).self) {
-        try DeviceLinkContext(encoding: replacing(context(code), 2, .bytes(Array(repeating: 0, count: count))))
-      }
-    }
-  }
-
-  @Test func requestValidatesKeyPurposesAndAlgorithms() async throws {
-    let (request, _) = try await request()
-    let algorithms: [PublicKey.Algorithm] = [.mlDSA65, .ed25519, .p256]
-    let varied = try DeviceLinkRequest(device: request.device, recipient: request.recipient,
-      label: request.label, verifies: algorithms)
-    #expect(Set(try DeviceLinkRequest(encoding: varied.encoding).verifies) == Set(algorithms))
-    let identity = try await IdentityPrivateKey.generate(.ed25519, using: backend)
-    #expect(throws: (any Error).self) {
-      try DeviceLinkRequest(encoding: replacing(request.encoding, 2, .bytes(identity.publicKey.key.encoding)))
-    }
-    for field: UInt64 in [2, 3, 4, 5] {
-      for invalid: CBOR? in [nil, .unsigned(0), .text("wrong type")] {
-        if field == 4 && invalid == .text("wrong type") { continue }
-        #expect(throws: (any Error).self) { try DeviceLinkRequest(encoding: replacing(request.encoding, field, invalid)) }
-      }
-    }
-    #expect(throws: (any Error).self) {
-      try DeviceLinkRequest(encoding: replacing(request.encoding, 5, .array([.unsigned(999)])))
-    }
-    let x25519 = try await backend.makeEncryptionKey(.x25519)
-    #expect(throws: (any Error).self) {
-      try DeviceLinkRequest(device: request.device, recipient: x25519.publicKey, label: request.label, verifies: [.ed25519])
-    }
-    #expect(throws: (any Error).self) {
-      try DeviceLinkRequest(encoding: replacing(request.encoding, 3, .bytes(x25519.publicKey.encoding)))
-    }
-  }
-
-  @Test func correctGrantsOpenAndPreserveExactPublishedProfile() async throws {
-    let (request, recipient) = try await request()
-    let code = try code(request)
+  @Test func metadataTravelsAtBlahsKeyOnlyWithSeedTransfer() async throws {
+    let (request, recipient, code) = try await request()
     var alice = try await identity()
     try await alice.add(request.device)
+    let sealed = try await seed.sealed(to: request.recipient, identity: alice.profile.identityKey,
+      using: backend)
     for transfer in [false, true] {
-      let sealed = try await transfer ? seed.sealed(to: request.recipient, identity: alice.profile.identityKey, using: backend) : nil
       let metadata: [UInt8]? = transfer ? [0, 255, 1, 128] : nil
-      let grant = try DeviceLinkGrant(encoding: plaintext(alice.profile, seed: sealed, metadata: metadata))
-      #expect(grant.encoding == plaintext(alice.profile, seed: sealed, metadata: metadata))
+      let grant = try DeviceLinkGrant(profile: alice.profile, domain: domain,
+        seed: transfer ? sealed : nil, metadata: metadata)
+      #expect(grant.encoding == plaintext(alice.profile, seed: transfer ? sealed : nil,
+        blah: metadata.map(CBOR.bytes)))
       let response = try await DeviceLinkResponse.seal(grant, for: request, code: code, using: backend)
-      let opened = try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-        code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
-      #expect(opened.grant.profile == alice.profile.encoding)
+      let opened = try await DeviceLinkResponse.open(response, recipientKey: recipient,
+        request: request, code: code, expectedDC: Fixture.dcID, using: backend)
+      #expect(opened.grant.profile == alice.profile.encoding && opened.profile == alice.profile)
       #expect(opened.grant.metadata == metadata)
       #expect(opened.seed?.entropy == (transfer ? seed.entropy : nil))
-      // Independent context construction must also produce an interoperable response.
-      let raw = try await rawResponse(grant.encoding, request: request, code: code)
-      _ = try await DeviceLinkResponse.open(raw, recipientKey: recipient, request: request,
-        code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
     }
-  }
-
-  @Test func rejectsWrongSecretsDigestsRecipientsAndTampering() async throws {
-    let (request, recipient) = try await request()
-    let code = try code(request)
-    var alice = try await identity()
-    try await alice.add(request.device)
-    let grant = plaintext(alice.profile)
-    let response = try await rawResponse(grant, request: request, code: code)
-    var tampered = response
-    tampered[tampered.count - 1] ^= 1
-    let other = try await backend.makeEncryptionKey(.p256)
-    let wrongSecret = try DeviceLinkCode(requestDigest: request.digest, secret: Array(repeating: 99, count: 16))
-    let wrongDigest = try DeviceLinkCode(requestDigest: Digest(hashing: [1]), secret: secret)
-    for candidate in [wrongSecret, wrongDigest] {
-      await #expect(throws: (any Error).self) {
+    _ = try DeviceLinkGrant(profile: alice.profile, domain: domain, seed: sealed,
+      metadata: Array(repeating: 42, count: DeviceLinkGrant.maximumMetadataBytes))
+    for (seed, metadata): (SealedIdentitySeed?, [UInt8]) in [(nil, [1]), (sealed, Array(repeating: 42, count: 16_385))] {
+      #expect(throws: BlahError.invalidDeviceLink) {
+        try DeviceLinkGrant(profile: alice.profile, domain: domain, seed: seed, metadata: metadata)
+      }
+    }
+    for (seed, blah): (SealedIdentitySeed?, CBOR) in [(nil, .bytes([1])), (sealed, .text("x"))] {
+      let response = try await rawResponse(plaintext(alice.profile, seed: seed, blah: blah),
+        request: request, code: code)
+      await #expect(throws: BlahError.invalidDeviceLink) {
         try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-          code: candidate, expectedDC: Fixture.dcID, at: backend.now, using: backend)
+          code: code, expectedDC: Fixture.dcID, using: backend)
       }
-    }
-    // Even a valid ciphertext under the caller's wrong digest cannot authorize the request.
-    let wrongBinding = try await rawResponse(grant, request: request, code: wrongDigest)
-    for bytes in [tampered, try await rawResponse(grant, request: request, code: code, recipient: other.publicKey), wrongBinding] {
-      await #expect(throws: (any Error).self) {
-        try await DeviceLinkResponse.open(bytes, recipientKey: recipient, request: request,
-          code: bytes == wrongBinding ? wrongDigest : code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
-      }
-    }
-    await #expect(throws: (any Error).self) {
-      try await DeviceLinkResponse.open(response, recipientKey: other, request: request,
-        code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
     }
   }
 
-  @Test func rejectsUnauthorizingProfilesAndCustody() async throws {
-    let (request, recipient) = try await request()
-    let code = try code(request)
+  @Test func opensOnlyAnAllocatedUserHomedAtTheExpectedDC() async throws {
+    let (request, recipient, code) = try await request()
     var alice = try await identity()
-    let beforeAdding = alice.profile
     try await alice.add(request.device)
-    let certified = alice.profile
-    let removed = try await alice.remove(request.device.id)
-    #expect(removed.generation > certified.generation)
     var unallocated = try await identity(home: Fixture.home())
     try await unallocated.add(request.device)
     var homeless = try await identity(home: nil)
     try await homeless.add(request.device)
-    var bot = try await identity(kind: false)
+    var bot = try await identity(user: false)
     try await bot.add(request.device)
-    // A relay cannot resurrect an old certificate by appending it to the new generation.
-    var oldCertificateEnvelope = try fields(removed.encoding)
-    let stale = try #require(certified.devices.first { $0.device == request.device })
-    oldCertificateEnvelope[3] = .array(removed.devices.map { .bytes($0.encoding) } + [.bytes(stale.encoding)])
-    let staleCertificateGrant = try replacing(plaintext(removed), 2, .bytes(CBOR.record(oldCertificateEnvelope).encoded))
-    let foreignSeed = try IdentitySeed.generate(using: backend)
-    let otherIdentity = try await identity(seed: foreignSeed)
-    let foreignKey = try await foreignSeed.sealed(to: request.recipient, identity: otherIdentity.profile.identityKey, using: backend)
-    let validKey = try await seed.sealed(to: request.recipient, identity: alice.profile.identityKey, using: backend)
-    var shortLived = try await BasicIdentity<AnyBlahProfile>(
-      .user(HostedContent(home: Fixture.home(account: 42), domains: [domain])),
-      identityKey: #require(alice.identityKey), deviceKey: alice.deviceKey,
-      profileLifetime: 60, using: backend)
-    try await shortLived.add(request.device)
-    #expect(shortLived.profile.validity.expiresAt < shortLived.profile.home!.expiresAt)
-    #expect(shortLived.profile.validity.expiresAt < shortLived.profile.devices[0].validity.expiresAt)
-    var corruptedProfile = certified.encoding
-    corruptedProfile[corruptedProfile.count - 1] ^= 1
-    let tamperedProfileGrant = try replacing(plaintext(certified), 2, .bytes(corruptedProfile))
-    var corruptedKey = validKey.encoding
-    corruptedKey[corruptedKey.count - 1] ^= 1
-    let tamperedIdentityGrant = try replacing(plaintext(certified), 4, .bytes(corruptedKey))
-    let wrongRecipient = try await backend.makeEncryptionKey(.p256)
-    let wrongRecipientIdentity = try await seed.sealed(to: wrongRecipient.publicKey, identity: alice.profile.identityKey, using: backend)
-    let cases: [(String, [UInt8], Digest, UInt64)] = [
-      ("before adding", plaintext(beforeAdding), Fixture.dcID, backend.now),
-      ("removed device", plaintext(removed), Fixture.dcID, backend.now),
-      ("old certificate in new generation", staleCertificateGrant, Fixture.dcID, backend.now),
-      ("unlisted domain", plaintext(certified, domain: try DomainName("evil.example")), Fixture.dcID, backend.now),
-      ("wrong DC", plaintext(certified), Digest(hashing: [55]), backend.now),
-      ("unallocated account", plaintext(unallocated.profile), Fixture.dcID, backend.now),
-      ("no home", plaintext(homeless.profile), Fixture.dcID, backend.now),
-      ("bot profile", plaintext(bot.profile), Fixture.dcID, backend.now),
-      ("expired profile with live home and certificates", plaintext(shortLived.profile), Fixture.dcID, shortLived.profile.validity.expiresAt),
-      ("not yet valid", plaintext(certified), Fixture.dcID, certified.validity.notBefore - 1),
-      ("wrong identity key", plaintext(certified, seed: foreignKey), Fixture.dcID, backend.now),
-      ("tampered profile signature", tamperedProfileGrant, Fixture.dcID, backend.now),
-      ("tampered inner identity ciphertext", tamperedIdentityGrant, Fixture.dcID, backend.now),
-      ("identity key sealed to other recipient", plaintext(certified, seed: wrongRecipientIdentity), Fixture.dcID, backend.now),
-      ("metadata without identity", plaintext(certified, metadata: [1]), Fixture.dcID, backend.now),
-      ("another identity profile", plaintext(otherIdentity.profile, seed: foreignKey), Fixture.dcID, backend.now),
+    let cases: [(String, AnyBlahProfile, Digest?, UInt64, BlahError)] = [
+      ("no expected DC", alice.profile, nil, backend.now, .wrongHome),
+      ("wrong DC", alice.profile, Digest(hashing: [55]), backend.now, .wrongHome),
+      // The profile remains valid beyond this independently expiring home delegation.
+      ("expired home", alice.profile, Fixture.dcID, Fixture.home().expiresAt, .wrongHome),
+      ("unallocated account", unallocated.profile, Fixture.dcID, backend.now, .wrongHome),
+      ("no home", homeless.profile, Fixture.dcID, backend.now, .wrongHome),
+      ("bot profile", bot.profile, Fixture.dcID, backend.now, .invalidProfile),
     ]
-    for (name, plain, dc, now) in cases {
-      let response = try await rawResponse(plain, request: request, code: code)
-      await #expect(throws: (any Error).self, Comment(rawValue: name)) {
+    for (name, profile, dc, time, error) in cases {
+      let response = try await rawResponse(plaintext(profile), request: request, code: code)
+      await #expect(throws: error, Comment(rawValue: name)) {
         try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-          code: code, expectedDC: dc, at: now, using: backend)
+          code: code, expectedDC: dc, at: time, using: backend)
       }
     }
-  }
-
-  @Test func exactResponseSizeBoundaryAndSealRequestBinding() async throws {
-    let (request, recipient) = try await request()
-    let code = try code(request)
-    var alice = try await identity()
-    try await alice.add(request.device)
-    let plain = plaintext(alice.profile)
-    let sample = try replacing(plain, 99, .bytes(Array(repeating: 0, count: 60000)))
-    let overhead = try await rawResponse(sample, request: request, code: code).count - 60000
-    for size in [65536, 65537] {
-      let padded = try replacing(plain, 99, .bytes(Array(repeating: 0, count: size - overhead)))
-      let response = try await rawResponse(padded, request: request, code: code)
-      #expect(response.count == size)
-      let grant = try DeviceLinkGrant(encoding: padded)
-      if size == 65536 {
-        _ = try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-          code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
-        #expect(try await DeviceLinkResponse.seal(grant, for: request, code: code, using: backend).count == size)
-      } else {
-        await #expect(throws: (any Error).self) {
-          try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-            code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
-        }
-        await #expect(throws: (any Error).self) {
-          try await DeviceLinkResponse.seal(grant, for: request, code: code, using: backend)
-        }
-      }
+    // The approver refuses to seal what the new device would refuse to open.
+    let grant = try DeviceLinkGrant(profile: bot.profile, domain: domain)
+    await #expect(throws: BlahError.invalidProfile) {
+      try await DeviceLinkResponse.seal(grant, for: request, code: code, using: backend)
     }
-    let grant = try DeviceLinkGrant(encoding: plain)
-    let wrongDigest = try DeviceLinkCode(requestDigest: Digest(hashing: [42]), secret: secret)
-    await #expect(throws: (any Error).self) {
-      try await DeviceLinkResponse.seal(grant, for: request, code: wrongDigest, using: backend)
-    }
-  }
-
-  @Test func approverChecksBothSigningAlgorithmsBeforeCertifying() async throws {
-    let (request, _) = try await request()
-    let edIdentity = try await IdentityPrivateKey.generate(.ed25519, using: backend)
-    let p256Identity = try await IdentityPrivateKey.generate(.p256, using: backend)
-    let edDevice = try await DevicePrivateKey.generate(.ed25519, using: backend)
-    let p256Device = try await DevicePrivateKey.generate(.p256, using: backend)
-    try request.requireCompatible(identityKey: edIdentity.publicKey, device: edDevice.publicKey)
-    #expect(throws: (any Error).self) {
-      try request.requireCompatible(identityKey: p256Identity.publicKey, device: edDevice.publicKey)
-    }
-    #expect(throws: (any Error).self) {
-      try request.requireCompatible(identityKey: edIdentity.publicKey, device: p256Device.publicKey)
-    }
-  }
-
-  @Test func metadataAndResponseBoundsApplyToDecoding() async throws {
-    let (request, recipient) = try await request()
-    let code = try code(request)
-    var alice = try await identity()
-    try await alice.add(request.device)
-    let sealed = try await seed.sealed(to: request.recipient, identity: alice.profile.identityKey, using: backend)
-    for count in [0, 16384] {
-      let plain = plaintext(alice.profile, seed: sealed, metadata: Array(repeating: 42, count: count))
-      _ = try DeviceLinkGrant(encoding: plain)
-      let response = try await rawResponse(plain, request: request, code: code)
-      let opened = try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-        code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
-      #expect(opened.grant.metadata?.count == count)
-    }
-    let over = plaintext(alice.profile, seed: sealed, metadata: Array(repeating: 42, count: 16385))
-    #expect(throws: (any Error).self) { try DeviceLinkGrant(encoding: over) }
-    for plain in [over, plaintext(alice.profile, metadata: [])] {
-      let response = try await rawResponse(plain, request: request, code: code)
-      await #expect(throws: (any Error).self) {
-        try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-          code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
-      }
-    }
-    let large = try replacing(plaintext(alice.profile), 99, .bytes(Array(repeating: 0, count: 65536)))
-    let response = try await rawResponse(large, request: request, code: code)
-    #expect(response.count > 65536)
-    await #expect(throws: (any Error).self) {
-      try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
-        code: code, expectedDC: Fixture.dcID, at: backend.now, using: backend)
-    }
+    #expect(try await DeviceLinkGrant(profile: alice.profile, domain: domain)
+      .verify(for: request, expectedDC: Fixture.dcID, using: backend) == alice.profile)
   }
 }
 
@@ -473,7 +141,9 @@ extension DeviceLinkTests {
       .deletingLastPathComponent().appendingPathComponent("Web/tests")
   }
 
-  /// Run explicitly to refresh fixtures; normal test runs only read the checked-in vectors.
+  /// Native responses the web runtime opens, and its browsers' responses opened natively.
+  /// Set `BLAH_DEVICE_LINK_GENERATE=1` to rewrite the native fixture; the web tests
+  /// rewrite the browser fixture, which this test checks whenever it exists.
   @Test func nativeBrowserFixtures() async throws {
     let nativeURL = Self.vectorDirectory.appendingPathComponent("device-link-native.json")
     if ProcessInfo.processInfo.environment["BLAH_DEVICE_LINK_GENERATE"] == "1" {
@@ -491,14 +161,15 @@ extension DeviceLinkTests {
         identityKey: root, deviceKey: signer, using: backend)
       let request = try DeviceLinkRequest(device: device.publicKey, recipient: recipient.publicKey,
         label: "Interop desktop", verifies: [.ed25519, .p256])
-      let code = try code(request)
+      let code = try DeviceLinkCode(requestDigest: request.digest, secret: secret)
       try await alice.add(device.publicKey)
       let metadata: [UInt8] = [0xa1, 0x18, 0x63, 0x43, 0, 255, 128] // Opaque future application metadata.
       let sealed = try await seed.sealed(to: request.recipient, identity: root.publicKey, using: backend)
-      let grant = try DeviceLinkGrant(encoding: plaintext(alice.profile, seed: sealed, metadata: metadata))
-      let deviceOnly = try DeviceLinkGrant(encoding: plaintext(alice.profile))
+      let grant = try DeviceLinkGrant(profile: alice.profile, domain: domain, seed: sealed,
+        metadata: metadata)
+      let deviceOnly = try DeviceLinkGrant(profile: alice.profile, domain: domain)
       let vector = try await InteropVector(request: request.encoding, parameter: code.parameter,
-        code: code.encoding, context: context(code),
+        code: code.encoding, context: DeviceLinkContext(code: code).encoding,
         response: DeviceLinkResponse.seal(grant, for: request, code: code, using: backend),
         deviceOnlyResponse: DeviceLinkResponse.seal(deviceOnly, for: request, code: code, using: backend),
         profile: alice.profile.encoding, dc: Fixture.dcID.bytes, now: backend.now, domain: domain.name,
@@ -513,7 +184,7 @@ extension DeviceLinkTests {
     let code = try DeviceLinkCode(parameter: vector.parameter)
     let recipient = try await backend.makeEncryptionKey(.p256, restoring: vector.recipientSecret)
     #expect(code.encoding == vector.code)
-    #expect(context(code) == vector.context)
+    #expect(DeviceLinkContext(code: code).encoding == vector.context)
     #expect(request.encoding == vector.request)
     let opened = try await DeviceLinkResponse.open(vector.response, recipientKey: recipient,
       request: request, code: code, expectedDC: Digest(bytes: vector.dc), at: vector.now, using: backend)
@@ -523,8 +194,7 @@ extension DeviceLinkTests {
     struct BrowserVector: Codable { let engine: String; let realm: String; let response: [UInt8]; let deviceOnlyResponse: [UInt8] }
     struct BrowserVectors: Codable { let vectors: [BrowserVector] }
     let browserURL = Self.vectorDirectory.appendingPathComponent("device-link-browser.json")
-    if ProcessInfo.processInfo.environment["BLAH_DEVICE_LINK_GENERATE"] == "1" &&
-      !FileManager.default.fileExists(atPath: browserURL.path) { return }
+    guard FileManager.default.fileExists(atPath: browserURL.path) else { return }
     let browsers = try JSONDecoder().decode(BrowserVectors.self, from: Data(contentsOf: browserURL))
     #expect(!browsers.vectors.isEmpty)
     for browser in browsers.vectors {
