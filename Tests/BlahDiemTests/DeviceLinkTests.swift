@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Foundation
 import Testing
 

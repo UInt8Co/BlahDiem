@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Testing
 
 /// Blah proofs: a device signs a DC's statement for the identity it acts for.

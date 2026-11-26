@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Testing
 
 /// Blah records keep fixed numeric tags and integer field keys; in Diem records, Blah's

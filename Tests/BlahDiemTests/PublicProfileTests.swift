@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Testing
 
 @Suite struct PublicProfileTests {

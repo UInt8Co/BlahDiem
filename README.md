@@ -17,7 +17,7 @@ candidate.
 Name claims use Diem’s profile-hosting client with Blah’s native domain rules.
 See [Identities, profiles and proofs](Sources/BlahDiem/BlahDiem.docc/DeviceAuthority.md)
 for Blah's wire layout and rules. Requires Swift 6.4 or later. Run `swift test` to check
-the contracts. The package is
+the contracts; the tests use Diem's `DiemTesting` backend and profile host. The package is
 licensed under MIT; see [LICENSE](LICENSE).
 
 ## API documentation

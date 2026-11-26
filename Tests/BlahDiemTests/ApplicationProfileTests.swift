@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Testing
 
 /// Application profiles: client data, version ranges and the derived MTProto wire pair.

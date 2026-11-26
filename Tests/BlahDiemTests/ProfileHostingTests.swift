@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Testing
 
 @Suite struct ProfileHostingTests {
@@ -6,17 +7,17 @@ import Testing
 
   @Test func apexPolicyAndTargetsAreReexported() async throws {
     let domain = try DomainName("id.example")
-    let policy = try HostingPolicy(json: HostingTestHost.json(["domain": domain.name, "apex": true]).body,
+    let policy = try HostingPolicy(json: FakeProfileHost.json(["domain": domain.name, "apex": true]).body,
       domain: domain)
     #expect(policy.apex && !policy.servesChildNames)
     #expect(policy.names == nil)
     #expect(policy.requiredBits(for: "alice") == nil)
     #expect(policy.requiredBits(for: "@") == nil)
     #expect(throws: ProfileHostingError.invalidResponse) {
-      try HostingPolicy(json: HostingTestHost.json(["domain": domain.name, "apex": true,
+      try HostingPolicy(json: FakeProfileHost.json(["domain": domain.name, "apex": true,
         "labelPattern": "[a-z]+"]).body, domain: domain)
     }
-    let child = try HostingPolicy(json: HostingTestHost.json(HostingTestHost.policy()).body, domain: domain)
+    let child = try HostingPolicy(json: FakeProfileHost.json(FakeProfileHost.policy()).body, domain: domain)
     #expect(!child.apex && child.names?.baseBits == 4)
 
     let transport = ApexTransport()
@@ -55,7 +56,7 @@ import Testing
       .bot(.init(home: home, domains: [original])),
       .channel(.init(home: home, domains: [original]))
     ] {
-      let transport = HostingTestHost()
+      let transport = FakeProfileHost()
       let host = ProfileHostingClient(domain: try DomainName("id.example"), http: transport)
       var identity = try await BasicIdentity<AnyBlahProfile>(content, using: backend)
       let claim = try await identity.claiming(labels: ["alice"], at: host,
@@ -96,7 +97,7 @@ import Testing
     #expect(try content.replacingDomains([replacement]) == .dc(expected))
 
     for value in [sticker, content] {
-      let host = ProfileHostingClient(domain: try DomainName("id.example"), http: HostingTestHost())
+      let host = ProfileHostingClient(domain: try DomainName("id.example"), http: FakeProfileHost())
       let identity = try await BasicIdentity<AnyBlahProfile>(value, using: backend)
       await #expect(throws: BlahError.invalidName) {
         try await identity.releasing(labels: ["alice"], at: host)
@@ -126,17 +127,17 @@ private actor ApexTransport: HostingHTTPClient {
   func send(_ request: HostingHTTPRequest) async throws -> HostingHTTPResponse {
     requests.append(request)
     if request.url.hasSuffix("/names/@") {
-      return HostingTestHost.json(["label": "@", "status": encoding.isEmpty ? "available" : "claimed", "requiredBits": 4])
+      return FakeProfileHost.json(["label": "@", "status": encoding.isEmpty ? "available" : "claimed", "requiredBits": 4])
     }
     if request.method == .get { return .init(status: 200, body: encoding) }
     if encoding.isEmpty && request.headers["Diem-Hosting-Proof"] == nil {
-      return HostingTestHost.json(["type": "urn:diem:profile-hosting:proof-required",
+      return FakeProfileHost.json(["type": "urn:diem:profile-hosting:proof-required",
         "title": "Proof", "detail": "Proof", "status": 403,
         "labels": [["label": "@", "reason": "proof-required", "requiredBits": 4]]], status: 403)
     }
     encoding = request.body ?? []
     let profile = try ProfileRecord(encoding: encoding)
-    return HostingTestHost.json(["identity": HostingTestHost.base64(profile.id.bytes),
+    return FakeProfileHost.json(["identity": FakeProfileHost.base64(profile.id.bytes),
       "revision": profile.revision, "domains": profile.domains.map(\.name)])
   }
 }

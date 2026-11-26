@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Testing
 
 /// Blah's QR device link uses Diem's records unchanged; these bytes were assembled

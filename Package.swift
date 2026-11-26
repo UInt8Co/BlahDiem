@@ -16,7 +16,8 @@ let package = Package(
       .product(name: "DiemProfileHostingClient", package: "diem")]),
     .testTarget(
       name: "BlahDiemTests",
-      dependencies: ["BlahDiem", .product(name: "DiemSwiftCrypto", package: "diem")]
+      dependencies: ["BlahDiem", .product(name: "DiemSwiftCrypto", package: "diem"),
+        .product(name: "DiemTesting", package: "diem")]
     ),
   ],
   swiftLanguageModes: [.v6]

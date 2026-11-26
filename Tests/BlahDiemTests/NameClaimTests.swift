@@ -1,4 +1,5 @@
 import BlahDiem
+import DiemTesting
 import Testing
 
 /// Blah profiles: homes, served domains and public names.
