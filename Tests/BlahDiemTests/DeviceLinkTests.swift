@@ -72,13 +72,23 @@ import Testing
         try DeviceLinkGrant(profile: alice.profile, domain: domain, seed: seed, metadata: metadata)
       }
     }
+    // Blah refuses its field before Diem opens a sealed seed: only the response box opens.
+    final class Opens: @unchecked Sendable { var count = 0 }
+    let opens = Opens()
+    let counting = EncryptionPrivateKey(publicKey: recipient.publicKey,
+      protection: recipient.protection, rawRepresentation: nil) { box, context in
+      opens.count += 1
+      return try await recipient.open(box, context: context)
+    }
     for (seed, blah): (SealedIdentitySeed?, CBOR) in [(nil, .bytes([1])), (sealed, .text("x"))] {
       let response = try await rawResponse(plaintext(alice.profile, seed: seed, blah: blah),
         request: request, code: code)
+      opens.count = 0
       await #expect(throws: BlahError.invalidDeviceLink) {
-        try await DeviceLinkResponse.open(response, recipientKey: recipient, request: request,
+        try await DeviceLinkResponse.open(response, recipientKey: counting, request: request,
           code: code, expectedDC: Fixture.dcID, using: backend)
       }
+      #expect(opens.count == 1)
     }
   }
 

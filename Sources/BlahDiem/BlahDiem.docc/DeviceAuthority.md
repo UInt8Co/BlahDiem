@@ -76,8 +76,10 @@ for the records, the code's binding and the checks Diem makes. Blah adds its own
 
 ``DeviceLinkResponse/seal(_:for:code:using:)`` and
 ``DeviceLinkResponse/open(_:recipientKey:request:code:expectedDC:at:using:)`` apply
-these rules to Diem's `seal` and `open` with ``AnyBlahProfile``; ``DeviceLinkGrant``
-carries the metadata. Any opening failure ends the
+these rules to Diem's `seal` and `open` with ``AnyBlahProfile``, as their acceptance
+check ``DeviceLinkGrant/acceptLink(of:at:expectedDC:)``. It runs before a sealed seed is
+opened, so a refused grant never reveals its seed. ``DeviceLinkGrant`` carries the
+metadata. Any opening failure ends the
 link session. After success the caller stores custody before completing sign-in with a
 proof from the new device; account password checks still apply. The web package's README
 describes its opaque session and custody API.
