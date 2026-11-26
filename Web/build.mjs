@@ -79,12 +79,11 @@ for(const name of ['diem.js', 'device-link-worker.js', 'diem.wasm', 'diem.d.ts',
     }
   }
 }
-// Budgets include recovery words, HPKE and Ed25519 public derivation.
-// The worker also derives public identity keys when checking transferred seeds.
-// Both bundles carry the glue for every export, including DiemWeb's generic
-// (ProfileRecord) profile and device-link exports, which the WASM also links.
-if(files['diem.wasm'].bytes > 690_000 || files['diem.wasm.br'].bytes > 220_000 ||
-  files['diem.js'].bytes > 165_000 || files['device-link-worker.js'].bytes > 152_000) {
+// Budgets sit just above the current sizes and include recovery words, HPKE and Ed25519
+// public derivation. The worker also derives public identity keys when checking
+// transferred seeds. Both bundles carry the BridgeJS glue for every export.
+if(files['diem.wasm'].bytes > 640_000 || files['diem.wasm.br'].bytes > 206_000 ||
+  files['diem.js'].bytes > 138_000 || files['device-link-worker.js'].bytes > 143_000) {
   throw new Error('Web artifact exceeds its size budget; inspect before releasing.');
 }
 const source = {repository: 'https://github.com/UInt8Co/BlahDiem',

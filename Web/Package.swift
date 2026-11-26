@@ -8,7 +8,7 @@ let package = Package(
   name: "BlahDiemWeb",
   dependencies: [
     .package(name: "BlahDiem", path: ".."),
-    .package(url: "https://github.com/UInt8Co/diem.git", revision: "ad2337abf9ac2a640b2d3bf6bee5312941bd38ef"),
+    .package(url: "https://github.com/UInt8Co/diem.git", revision: "0f0302c181c78ab48ab1d8f176853e7db542b039"),
     .package(url: "https://github.com/swiftwasm/JavaScriptKit.git", revision: "777848dfd70279c34f885c0c2f9e2c3fc3a45698"),
   ],
   targets: [

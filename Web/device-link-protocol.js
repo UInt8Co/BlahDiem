@@ -1,10 +1,10 @@
 // Blah's device-link protocol over Diem's link machinery: the joining device opens a grant
 // for the DC it expects, and Blah's opaque metadata travels only with seed transfer.
-// Its own module keeps the link worker bundle small.
-import {diemLinkProtocol, linkBytes, linkParameter} from './.build-embedded/checkouts/diem/Web/device-link-protocol.js';
+// Its own module keeps the link worker bundle small. It replaces every member of Diem's
+// generic protocol, so it does not spread (and bundle) that one.
+import {linkBytes, linkParameter} from './.build-embedded/checkouts/diem/Web/device-link-protocol.js';
 
 export const blahLinkProtocol = {
-  ...diemLinkProtocol,
   openInput(response, expectedDC) {
     const dc = linkBytes(expectedDC, 32);
     if(dc.length !== 32) throw new TypeError('Invalid DC identity');
