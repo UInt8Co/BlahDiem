@@ -29,8 +29,9 @@ import JavaScriptEventLoop
   public let challengeKind: String?
   public let approvedChallenge: [UInt8]?
   public let domains: [String]?
+  public let fields: [UInt8]?
 
-  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, profileLifetime: Double, deviceLifetime: Double, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?, kind: String, challengeKind: String?, approvedChallenge: [UInt8]?, domains: [String]? = nil) {
+  public init(operation: String, domain: String, profile: [UInt8], now: Double, dc: [UInt8], dcDomain: String, generation: String, profileLifetime: Double, deviceLifetime: Double, account: String?, device: [UInt8]?, challenge: [UInt8]?, query: [UInt8]?, keyID: String?, sessionID: String?, expiresAt: Double?, kind: String, challengeKind: String?, approvedChallenge: [UInt8]?, domains: [String]? = nil, fields: [UInt8]? = nil) {
     self.operation = operation
     self.domain = domain
     self.profile = profile
@@ -51,6 +52,7 @@ import JavaScriptEventLoop
     self.challengeKind = challengeKind
     self.approvedChallenge = approvedChallenge
     self.domains = domains
+    self.fields = fields
   }
 }
 
@@ -113,9 +115,20 @@ JavaScriptEventLoop.installGlobalExecutor()
       let kind = input.kind
       var identity: BasicIdentity<AnyBlahProfile>
       if input.operation == "create" {
-        let content = try HostedProfile(kind: kind,
-          home: Home(dc: dc, epoch: 1, expiresAt: backend.now + deviceLifetime),
-          domains: [DomainName(domain)]).content
+        var created: HostedProfile
+        if let fields = input.fields {
+          // Exactly the caller's content, whatever its home epoch and account; only the
+          // home delegation is re-stamped, as `renew` does.
+          created = try HostedProfile(AnyBlahProfile.Content(fields: ProfileFields(encoding: fields)), kind: kind)
+          guard let home = created.home, created.domains.contains(where: { $0.name == domain })
+          else { throw BlahError.wrongHome }
+          created.home = Home(dc: home.dc, epoch: home.epoch, expiresAt: backend.now + deviceLifetime, account: home.account)
+        } else {
+          created = try HostedProfile(kind: kind,
+            home: Home(dc: dc, epoch: 1, expiresAt: backend.now + deviceLifetime),
+            domains: [DomainName(domain)])
+        }
+        let content = try created.content
         guard let identityKey else { throw DiemError.identityKeyRequired }
         identity = try await BasicIdentity(content, identityKey: identityKey, deviceKey: deviceKey,
           profileLifetime: profileLifetime, deviceLifetime: deviceLifetime, using: backend)

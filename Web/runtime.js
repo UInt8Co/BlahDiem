@@ -10,7 +10,7 @@ import {blahLinkProtocol} from './device-link-protocol.js';
 const operations = new Set(['create', 'enroll', 'inspect', 'renew', 'account', 'home', 'domains', 'addDevice', 'removeDevice', 'prove']);
 const kinds = new Set(['user', 'channel', 'bot', 'stickerSet', 'dc']);
 const challengeKinds = new Set(['invocation', 'login', 'oauthConsent', 'accountLink', 'dcAdmin']);
-const optional = ['account', 'device', 'challenge', 'query', 'keyID', 'sessionID', 'expiresAt', 'challengeKind', 'approvedChallenge', 'domains'];
+const optional = ['account', 'device', 'challenge', 'query', 'keyID', 'sessionID', 'expiresAt', 'challengeKind', 'approvedChallenge', 'domains', 'fields'];
 
 function backend(crypto) {
   for(const name of ['random', 'publicKey', 'sign', 'verify']) {
@@ -33,7 +33,7 @@ export async function createDiem(wasmURL = new URL('./diem.wasm', import.meta.ur
       const request = {...input, profileLifetime: input.profileLifetime ?? 180 * 86400,
         deviceLifetime: input.deviceLifetime ?? 180 * 86400};
       for(const name of optional) request[name] ??= null;
-      for(const name of ['dc', 'profile', 'device', 'challenge', 'query', 'approvedChallenge']) {
+      for(const name of ['dc', 'profile', 'device', 'challenge', 'query', 'approvedChallenge', 'fields']) {
         if(request[name] === null && optional.includes(name)) continue;
         // A DC administration challenge can carry a 128 KiB document.
         request[name] = bytes(request[name], name, name === 'challenge' || name === 'approvedChallenge' ? 140_000 : 100_000);

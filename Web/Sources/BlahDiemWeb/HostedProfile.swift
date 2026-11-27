@@ -29,6 +29,21 @@ struct HostedProfile {
     }
   }
 
+  /// Hosted (non-DC) content of `kind`, as `create` receives it in a caller-supplied `fields` encoding.
+  init(_ content: AnyBlahProfile.Content, kind: String) throws {
+    self.kind = kind
+    switch content {
+    case .user(let c) where kind == "user", .channel(let c) where kind == "channel",
+      .bot(let c) where kind == "bot":
+      home = c.home
+      domains = c.domains
+    case .stickerSet(let c) where kind == "stickerSet":
+      home = c.home
+      domains = [c.shortName]
+    default: throw BlahError.invalidProfile
+    }
+  }
+
   var content: AnyBlahProfile.Content {
     get throws {
       if var dc {

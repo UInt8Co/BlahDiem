@@ -229,6 +229,20 @@ export async function exerciseProfiles({diem, backend, check, rejects, base, ali
     }
   }
 
+  // `create` with caller-supplied fields keeps the content, re-stamping only the home expiry.
+  {
+    const signer = await backend();
+    const home = {0: bytes(dc), 1: 7, 2: 1, 3: 4242};
+    const given = {9: ['moved.example.org', 'other.example.org'], 'com.blahim': {0: 1, 1: home}};
+    const request = {...base, kind: 'user', domain: 'moved.example.org', fields: encode(given)};
+    const adopted = await diem.identityOperation(request, signer);
+    const map = blah(adopted.profile);
+    check(map[1][1] === 7 && map[1][3] === 4242 && map[1][2] === base.now + 180 * 86400, 'Create adopts supplied home');
+    check(adopted.domains.join() === 'moved.example.org,other.example.org' && adopted.account === '4242', 'Create adopts supplied domains');
+    await rejects(() => diem.identityOperation({...request, kind: 'channel'}, signer));
+    await rejects(() => diem.identityOperation({...request, domain: 'unlisted.example.org'}, signer));
+  }
+
   // DC setup data: domains (9) and Blah's map, which a DC profile signs as given.
   const dcData = encode({9: ['dc.example.org'], 'com.blahim': {0: 5, 2: [{0: 'dc.example.org', 1: 443, 2: true, 3: 1, 4: '/apiws'}],
     3: [{0: 'dc.example.org', 1: 8443, 2: true, 3: 0, 4: null}], 4: 'transport-public-key', 5: 1}});

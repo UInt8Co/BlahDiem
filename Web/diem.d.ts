@@ -11,7 +11,7 @@ export type {CryptoBackend, DeviceKey, SeedIdentity, DeviceLinkSession, DeviceLi
 
 /** The runtime normalizes omitted optional values and typed byte arrays before BridgeJS. */
 type OptionalIdentityField = 'account' | 'device' | 'challenge' | 'query' | 'keyID' | 'sessionID' | 'expiresAt'
-  | 'challengeKind' | 'approvedChallenge' | 'domains' | 'profileLifetime' | 'deviceLifetime';
+  | 'challengeKind' | 'approvedChallenge' | 'domains' | 'fields' | 'profileLifetime' | 'deviceLifetime';
 type InputValue<T> = T extends number[] ? number[] | Uint8Array : T;
 type IdentityInputFields = {[K in keyof IdentityRequest]: InputValue<IdentityRequest[K]>};
 export type IdentityInput = Omit<IdentityInputFields, OptionalIdentityField>
@@ -93,7 +93,9 @@ export interface DiemClient {
   deviceLink: DeviceLink<[response: Uint8Array | number[], expectedDC: Uint8Array | number[]],
     DeviceLinkOpened, DeviceLinkApproval>;
   /** create/enroll/inspect/renew/account/home/domains/addDevice/removeDevice/prove.
-   * enroll derives authority from the identity signer and certifies a fresh device. */
+   * enroll derives authority from the identity signer and certifies a fresh device.
+   * create publishes the canonical `ProfileFields` encoding in `fields` when given (same
+   * shape as `dcSetup`'s `data`), instead of a new epoch-1 home at `dc`. */
   identityOperation(input: IdentityInput, crypto: CryptoBackend): Promise<IdentityResult>;
   dcSetup(input: DCSetupInput): Promise<DCSetupResult>;
   verifyDCProfile(domain: string, encoding: number[] | Uint8Array, now: number, crypto: Pick<CryptoBackend, 'verify'>): Promise<DCDiscoveryResult>;

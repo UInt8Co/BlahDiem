@@ -33,6 +33,12 @@ Each asynchronous operation retains its own crypto backend.
   exceed device lifetime. Results include ordered profile domains and profile/device validity intervals;
   callers own renewal scheduling and publication. Renewal also extends the home
   delegation to the device expiry.
+`create` normally publishes a new epoch-1 home at `dc` listing `domain`. With the optional
+`fields` bytes (canonical `ProfileFields`, the shape `dcSetup`'s `data` takes) it publishes
+exactly that content instead: its kind must equal `kind`, `domain` must be listed, and the
+home may carry any epoch and account; only the home's expiry is set to now plus
+`deviceLifetime`, as renewal does. The caller's crypto object chooses the device key, so
+reusing an existing device is the caller's choice.
 `dc` names the DC the caller is acting at. Inspection, renewal, domain and device changes
 work whichever DC hosts the identity; `namespace` is empty unless `dc` is its home. `prove`
 and `account` require `dc` to be the home and otherwise reject with `wrongHome`. Read the
